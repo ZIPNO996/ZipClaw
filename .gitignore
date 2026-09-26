@@ -1,0 +1,43 @@
+# 环境变量与密钥
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# uv
+.uv/
+
+# 测试与覆盖率
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
