@@ -3,7 +3,7 @@
 import json
 from ..llm.base import BaseLLM
 from ..tools.registry import ToolRegistry
-
+from pydantic import ValidationError
 
 class AgentLoop:
     """
@@ -117,15 +117,43 @@ class AgentLoop:
 
             # 再逐个执行工具，将结果与调用 ID 对应起来。
             for call in response.tool_calls:
-                result = await self.tools.execute(
-                    name=call.name,
-                    arguments=call.arguments,
-                )
+                try:
+                    result = await self.tools.execute(
+                        name=call.name,
+                        arguments=call.arguments,
+                    )
+                    content = str(result)
 
+                except ValidationError as exc:
+                    # 工具参数不符合 Pydantic 模型要求。
+                    # 不回传原始输入，避免错误信息重复暴露敏感内容。
+                    errors = exc.errors(
+                        include_input=False,
+                        include_url=False,
+                        include_context=False,
+                    )
+                    content = (
+                            "工具参数校验失败，请修正参数后重试："
+                            + json.dumps(errors, ensure_ascii=False)
+                    )
+
+                except KeyError:
+                    # 当前 registry.get() 用 KeyError 表示工具不存在。
+                    content = f"工具不存在：{call.name}，请使用已提供的工具。"
+
+                except ValueError as exc:
+                    # 例如 read_file 拒绝访问工作区之外的路径。
+                    content = f"工具执行被拒绝：{exc}"
+
+                except OSError:
+                    # 文件权限不足、文件在读取前被删除等。
+                    content = "文件操作失败，请检查路径、文件是否存在及访问权限。"
+
+                    # 无论成功还是失败，都给本次调用一个结果。
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.id,
-                    "content": str(result),
+                    "content": content,
                 })
 
         # 如果循环次数超过限制，
