@@ -23,6 +23,7 @@ async def main():
     #
     # codeclaw ./my-project
     workspace = Path.cwd()
+    print(f"工作区:{workspace}")
 
     # 创建 LLM。
     llm = OpenAILLM(

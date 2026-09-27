@@ -49,6 +49,9 @@ class LLMResponse(BaseModel):
     # content 很可能是 None。
     content: str | None = None
 
+    # 保存模型返回的推理字段，供后续请求原样回传。
+    reasoning_content: str | None = None
+
     # 模型要求执行的工具。
     #
     # 使用 default_factory，

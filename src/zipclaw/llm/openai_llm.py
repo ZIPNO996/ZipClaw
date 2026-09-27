@@ -40,7 +40,6 @@ class OpenAILLM(BaseLLM):
             model=self.model,
             messages=messages,
             tools=tools,
-            extra_body={"thinking": {"type": "disabled"}},
         )
 
         # 第一版默认只处理第一个 choice。
@@ -74,5 +73,7 @@ class OpenAILLM(BaseLLM):
         # 不会知道这是 OpenAI SDK 返回的。
         return LLMResponse(
             content=message.content,
+            #deepseek思考模式下的toolcalling要求回传思考内容
+            reasoning_content=getattr(message, "reasoning_content", None),
             tool_calls=tool_calls,
         )

@@ -88,68 +88,45 @@ class AgentLoop:
             # ==========================
             # 情况 2：LLM 请求调用 Tool
             # ==========================
-            for call in response.tool_calls:
+            # 一次模型响应对应一条 assistant 消息，
+            # 其中可能包含多个工具调用。
+            assistant_message = {
+                "role": "assistant",
+                "content": response.content,
+                "tool_calls": [
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": json.dumps(
+                                call.arguments,
+                                ensure_ascii=False,
+                            ),
+                        },
+                    }
+                    for call in response.tool_calls
+                ],
+            }
 
-                # 真正执行工具。
-                #
-                # 例如：
-                #
-                # read_file(
-                #     path="calculator.py"
-                # )
+            # 原样保留模型返回的字段，不自己编写或拼接内容。
+            if response.reasoning_content is not None:
+                assistant_message["reasoning_content"] = response.reasoning_content
+
+            messages.append(assistant_message)
+
+            # 再逐个执行工具，将结果与调用 ID 对应起来。
+            for call in response.tool_calls:
                 result = await self.tools.execute(
                     name=call.name,
                     arguments=call.arguments,
                 )
 
-                # 记录 assistant 发起了什么工具调用。
-                #
-                # 注意：
-                # 这里第一版只是表达我们的内部逻辑。
-                #
-                # 后续可以进一步设计自己的 Message Model，
-                # 再由 Provider Adapter 转换为 OpenAI 消息格式。
-                #ensure_ascii=False	保留原字符，中文就是中文，emoji 就是 emoji
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "tool_calls": [
-                            {
-                                "id": call.id,
-                                "type": "function",
-                                "function": {
-                                    "name": call.name,
-                                    "arguments": json.dumps(call.arguments, ensure_ascii=False),
-                                },
-                            }
-                        ],
-                    }
-                )
-
-                # 把 Tool 的执行结果告诉模型。
-                #
-                # 比如 read_file 得到：
-                #
-                # def add(a, b):
-                #     return a + b
-                #
-                # 模型下一轮就能看到这些内容。
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.id,
-                        "content": str(result),
-                    }
-                )
-
-            # 执行完 Tool 后不会 return。
-            #
-            # 会回到 for 循环顶部，
-            # 再次调用：
-            #
-            # self.llm.chat(...)
-            #
-            # 于是模型可以根据工具结果继续思考。
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.id,
+                    "content": str(result),
+                })
 
         # 如果循环次数超过限制，
         # 很可能 Agent 出现死循环。
