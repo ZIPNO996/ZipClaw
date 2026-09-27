@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from .core.loop import AgentLoop
 from .llm.openai_llm import OpenAILLM
+from .tools.filesystem.list_dir import ListDirTool
 from .tools.filesystem.read_file import ReadFileTool
 from .tools.registry import ToolRegistry
 
@@ -35,8 +36,13 @@ async def main():
     # 创建 Agent 工具箱。
     registry = ToolRegistry()
 
-    # 第一版只注册一个工具：
-    # read_file
+    # 先用 list_dir 发现文件路径，再用 read_file 读取内容。
+    # 注册后 registry.schemas() 会自动把两个工具的参数格式提供给模型。
+    registry.register(
+        ListDirTool(
+            workspace=workspace
+        )
+    )
     registry.register(
         ReadFileTool(
             workspace=workspace
@@ -49,14 +55,33 @@ async def main():
         tools=registry,
     )
 
-    # 接收用户输入。
-    task = input("> ")
 
-    # 执行任务。
-    result = await agent.run(task)
+    print("输入 exit 或 quit 退出，输入 /clear 清空对话。")
 
-    # 输出最终答案。
-    print(result)
+    # agent 必须在循环外创建，这样才能一直保留同一个实例的历史。
+    while True:
+        try:
+            task = input("\n > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n已退出。")
+            break
+
+        # 空输入不调用模型。
+        if not task:
+            continue
+
+        if task.lower() in {"exit", "quit"}:
+            print("已退出。")
+            break
+
+        if task == "/clear":
+            # 保留第一条 system 消息，删除后面的对话记录。
+            del agent.messages[1:]
+            print("对话已清空。")
+            continue
+
+        result = await agent.run(task)
+        print(f"\nZipClaw > {result}")
 
 
 if __name__ == "__main__":

@@ -39,6 +39,16 @@ class AgentLoop:
         # 防止模型进入死循环，
         # 一直调用工具停不下来。
         self.max_steps = max_steps
+        self.messages: list[dict] = [
+            {
+                "role": "system",
+                "content": (
+                    "You are a coding agent. "
+                    "Use tools when needed to inspect the user's project. "
+                    "All file paths are relative to the workspace root."
+                ),
+            }
+        ]
 
     async def run(
         self,
@@ -49,20 +59,30 @@ class AgentLoop:
         """
 
         # messages 就是整个 Agent 当前的上下文。
-        messages = [
-            {
-                "role": "system",
-                "content": (
-                    "You are a coding agent. "
-                    "Use tools when needed to inspect "
-                    "the user's project."
-                ),
-            },
-            {
-                "role": "user",
-                "content": task,
-            },
-        ]
+        # messages = [
+        #     {
+        #         "role": "system",
+        #         "content": (
+        #             "You are a coding agent. "
+        #             "Use tools when needed to inspect "
+        #             "the user's project."
+        #         ),
+        #     },
+        #     {
+        #         "role": "user",
+        #         "content": task,
+        #     },
+        # ]
+
+
+        #append() 修改原列表，不需要赋回；重新创建列表并赋给局部变量，才需要考虑赋回。
+        #也就是最后不需要写self.messages=messages
+        messages = self.messages
+
+        messages.append({
+            "role": "user",
+            "content": task,
+        })
 
         # Agent Loop。
         #
@@ -83,7 +103,20 @@ class AgentLoop:
             #
             # "现在信息够了，我可以直接回答用户。"
             if not response.has_tool_calls:
-                return response.content or ""
+                content = response.content or ""
+
+                # 最终回答也要存起来，否则下一轮只记得用户问了什么，
+                # 却不记得模型回答了什么。
+                assistant_message = {
+                    "role": "assistant",
+                    "content": content,
+                }
+
+                if response.reasoning_content is not None:
+                    assistant_message["reasoning_content"] = response.reasoning_content
+
+                messages.append(assistant_message)
+                return content
 
             # ==========================
             # 情况 2：LLM 请求调用 Tool
