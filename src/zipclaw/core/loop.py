@@ -149,7 +149,7 @@ class AgentLoop:
                     # 文件权限不足、文件在读取前被删除等。
                     content = "文件操作失败，请检查路径、文件是否存在及访问权限。"
 
-                    # 无论成功还是失败，都给本次调用一个结果。
+                # 无论成功还是失败，都给本次调用一个结果。
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.id,
