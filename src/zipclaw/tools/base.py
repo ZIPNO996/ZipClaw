@@ -55,6 +55,7 @@ class BaseTool(ABC):
                 "description": self.description,
 
                 # Pydantic 自动生成 JSON Schema。
+                # 这里参数的description也会告知给模型。
                 "parameters": self.args_model.model_json_schema(),
             },
         }

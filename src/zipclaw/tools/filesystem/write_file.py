@@ -10,12 +10,8 @@
 # 相比手动拼接字符串，它可以处理不同系统的路径分隔符。
 from pathlib import Path
 
-# BaseModel 和 Field 来自第三方库 Pydantic。
-# BaseModel 用于定义、验证数据；Field 用于补充字段约束和描述。
 from pydantic import BaseModel, Field
 
-# .. 表示向上一级包：从 tools/filesystem 回到 tools，再导入 base.py。
-# BaseTool 是项目自己的工具基类，提供 schema()、run() 等公共方法。
 from ..base import BaseTool
 
 
