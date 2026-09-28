@@ -1,4 +1,5 @@
-#Adapter 层
+# src/zipclaw/llm/types.py
+# 模型适配层的数据结构
 
 from typing import Any
 
@@ -7,7 +8,7 @@ from pydantic import BaseModel, Field
 
 class ToolCall(BaseModel):
     """
-    表示 LLM 发起的一次工具调用。
+    表示模型发起的一次工具调用。
 
     例如模型可能返回：
     read_file(path="main.py")
@@ -17,7 +18,7 @@ class ToolCall(BaseModel):
     """
 
     # 一次工具调用的唯一 ID。
-    # 后面把工具执行结果返回给 LLM 时需要用到。
+    # 后面把工具执行结果返回给 模型 时需要用到。
     id: str
 
     # 工具名称，例如：
@@ -37,7 +38,7 @@ class ToolCall(BaseModel):
 
 class LLMResponse(BaseModel):
     """
-    ZipClaw 内部统一的 LLM 返回格式。
+    ZipClaw 内部统一的模型返回格式。
 
     无论底层使用 OpenAI、DeepSeek 还是 Claude，
     最终都转换成这个结构。

@@ -1,7 +1,7 @@
 [project]
 name = "zipclaw"
 version = "0.1.0"
-description = "Add your description here"
+description = "使用 Python 实现的学习型编程智能体，支持连续对话和文件工具。"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

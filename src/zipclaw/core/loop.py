@@ -7,19 +7,19 @@ from pydantic import ValidationError
 
 class AgentLoop:
     """
-    ZipClaw 最核心的 Agent 循环。
+    ZipClaw 最核心的智能体循环。
 
     基本逻辑：
 
-    LLM
+    模型
      ↓
-    要不要调用 Tool？
+    判断是否调用工具
      ↓
-    如果调用 → 执行 Tool
+    如果调用 → 执行工具
      ↓
-    把 Tool Result 给 LLM
+    把工具结果返回给模型
      ↓
-    再让 LLM 判断下一步
+    再让模型判断下一步
     """
 
     def __init__(
@@ -28,10 +28,10 @@ class AgentLoop:
         tools: ToolRegistry,
         max_steps: int = 10,
     ):
-        # 使用哪个 LLM。
+        # 使用哪个 模型。
         self.llm = llm
 
-        # Agent 有哪些工具。
+        # 智能体 有哪些工具。
         self.tools = tools
 
         # 最大循环次数。
@@ -43,9 +43,9 @@ class AgentLoop:
             {
                 "role": "system",
                 "content": (
-                    "You are a coding agent. "
-                    "Use tools when needed to inspect the user's project. "
-                    "All file paths are relative to the workspace root."
+                    "你是一个编程智能体。"
+                    "根据需要使用工具查看或修改用户的项目。"
+                    "所有工具路径都相对于工作区根目录。请使用中文回答用户。"
                 ),
             }
         ]
@@ -58,14 +58,14 @@ class AgentLoop:
         执行一个用户任务。
         """
 
-        # messages 就是整个 Agent 当前的上下文。
+        # messages 就是整个 智能体 当前的上下文。
         # messages = [
         #     {
         #         "role": "system",
         #         "content": (
-        #             "You are a coding agent. "
-        #             "Use tools when needed to inspect "
-        #             "the user's project."
+        #             "你是一个编程智能体。"
+        #             "根据需要使用工具查看"
+        #             "用户的项目。"
         #         ),
         #     },
         #     {
@@ -84,19 +84,19 @@ class AgentLoop:
             "content": task,
         })
 
-        # Agent Loop。
+        # 智能体循环。
         #
-        # 每循环一次，可以认为 Agent 做了一步。
+        # 每循环一次，可以认为 智能体 做了一步。
         for _ in range(self.max_steps):
 
-            # 把当前消息和 Tool Schema 全部交给 LLM。
+            # 把当前消息和 工具参数说明 全部交给 模型。
             response = await self.llm.chat(
                 messages=messages,
                 tools=self.tools.schemas(),
             )
 
             # ==========================
-            # 情况 1：LLM 不调用工具
+            # 情况 1：模型 不调用工具
             # ==========================
             #
             # 说明模型认为：
@@ -119,7 +119,7 @@ class AgentLoop:
                 return content
 
             # ==========================
-            # 情况 2：LLM 请求调用 Tool
+            # 情况 2：模型 请求调用 工具
             # ==========================
             # 一次模型响应对应一条 assistant 消息，
             # 其中可能包含多个工具调用。
@@ -165,6 +165,17 @@ class AgentLoop:
                         include_url=False,
                         include_context=False,
                     )
+                    # 保留字段位置和错误类型，但不用第三方库的英文错误说明。
+                    for error in errors:
+                        error["msg"] = {
+                            "missing": "缺少必填参数。",
+                            "string_type": "参数必须是字符串。",
+                            "string_too_short": "字符串长度不足。",
+                            "int_parsing": "参数无法转换为整数。",
+                            "int_type": "参数必须是整数。",
+                            "greater_than_equal": "参数低于允许的最小值。",
+                            "less_than_equal": "参数超过允许的最大值。",
+                        }.get(error["type"], "参数不符合工具要求，请检查类型和取值。")
                     content = (
                             "工具参数校验失败，请修正参数后重试："
                             + json.dumps(errors, ensure_ascii=False)
@@ -190,7 +201,7 @@ class AgentLoop:
                 })
 
         # 如果循环次数超过限制，
-        # 很可能 Agent 出现死循环。
+        # 很可能 智能体 出现死循环。
         raise RuntimeError(
-            "Maximum agent steps reached."
+            "已达到智能体的最大执行步数。"
         )

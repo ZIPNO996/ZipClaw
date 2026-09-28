@@ -5,17 +5,17 @@ from .base import BaseTool
 
 class ToolRegistry:
     """
-    负责注册、查找和执行所有 Tool。
+    负责注册、查找和执行所有工具。
 
-    可以把它理解成 Agent 的"工具箱"。
+    可以把它理解成智能体的“工具箱”。
     """
 
     def __init__(self):
-        # key:
+        # 字典的键：
         #   工具名称，例如 read_file
         #
-        # value:
-        #   Tool 对象
+        # 字典的值：
+        #   工具 对象
         self._tools: dict[str, BaseTool] = {}
 
     def register(
@@ -23,13 +23,13 @@ class ToolRegistry:
         tool: BaseTool,
     ) -> None:
         """
-        注册一个 Tool。
+        注册一个工具。
         """
 
         # 防止出现两个相同名字的工具。
         if tool.name in self._tools:
             raise ValueError(
-                f"Tool already registered: {tool.name}"
+                f"工具已注册，不能重复注册： {tool.name}"
             )
 
         self._tools[tool.name] = tool
@@ -44,21 +44,21 @@ class ToolRegistry:
 
         if name not in self._tools:
             raise KeyError(
-                f"Unknown tool: {name}"
+                f"工具不存在： {name}"
             )
 
         return self._tools[name]
 
     def schemas(self) -> list[dict]:
         """
-        把目前所有工具的 Schema 返回给 LLM。
+        把目前所有工具的参数结构返回给模型。
 
         假设注册了：
 
         read_file
         bash
 
-        那么这里就会返回这两个工具对应的 JSON Schema。
+        那么这里就会返回这两个工具对应的 JSON 参数结构。
         """
 
         return [
@@ -74,7 +74,7 @@ class ToolRegistry:
         """
         根据名字执行工具。
 
-        AgentLoop 不需要知道具体是什么 Tool，
+        AgentLoop 不需要知道具体是哪种工具，
         只需要：
 
         registry.execute(

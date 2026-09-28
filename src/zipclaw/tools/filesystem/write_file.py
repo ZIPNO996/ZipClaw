@@ -23,17 +23,17 @@ class WriteFileArgs(BaseModel):
     # 单独的 Python 类型标注不会自动校验，但 Pydantic 会读取它并验证输入。
     # Field 没有给出默认值，因此调用者必须提供 path。
     # min_length=1 拒绝空字符串 ""；纯空格仍需下面 execute() 额外检查。
-    # description 也会进入工具的 JSON Schema，帮助模型理解参数用途。
+    # description 也会进入工具的 JSON 参数结构，帮助模型理解参数用途。
     path: str = Field(
         min_length=1,
-        description="Relative path of the new file, for example: src/main.py.",
+        description="新文件的工作区相对路径，例如：src/main.py。",
     )
 
     # content 是要写入文件的完整文本，不是文件路径，也不是局部补丁。
     # 例如 "print('hello')\n"；\n 在字符串里表示换行。
     # 这个字段也必填，但允许 ""，这样就能创建一个内容为空的文件。
     content: str = Field(
-        description="Complete text content of the new file. May be empty.",
+        description="新文件的完整文本内容，可以为空字符串。",
     )
 
 
@@ -49,10 +49,10 @@ class WriteFileTool(BaseTool):
     # 括号里相邻的字符串会自动拼接成一个字符串，不是多个列表元素。
     # 描述告诉模型：这是“新建”工具，不要拿它修改已经存在的文件。
     description = (
-        "Create a new UTF-8 text file inside the workspace. "
-        "Use a path relative to the workspace root and provide the complete content. "
-        "Missing parent directories are created automatically. "
-        "Refuse to overwrite existing files; this tool is not for editing existing files."
+        "在工作区内创建新的 UTF-8 文本文件。"
+        "使用工作区相对路径，并提供文件的完整内容。"
+        "自动创建缺失的父目录。"
+        "拒绝覆盖已有文件；修改已有文件请使用 edit_file。"
     )
 
     # 这里保存的是 WriteFileArgs 这个类，不是 WriteFileArgs() 创建的对象。
@@ -89,13 +89,13 @@ class WriteFileTool(BaseTool):
         if not target.is_relative_to(self.workspace):
             # raise 是抛出异常，立即离开当前执行流程，而不是普通返回。
             # AgentLoop 已有的 except ValueError 会把它转成工具错误结果。
-            raise ValueError("Cannot access files outside workspace.")
+            raise ValueError("不能访问工作区之外的文件。")
 
         # strip() 返回去掉首尾空白的新字符串，不会修改原来的 args.path。
         # "" 是假值，所以 not args.path.strip() 能识别全是空白的输入。
         # 这里只检查，不把去掉空白后的路径拿去写入，以免改变原路径含义。
         if not args.path.strip():
-            raise ValueError("File path cannot be blank.")
+            raise ValueError("文件路径不能全部为空白。")
 
         # 符号链接类似一个指向其他路径的入口，不一定是普通文件。
         # 检查未 resolve 的 requested_path，才能识别最后一段是不是链接。
@@ -103,16 +103,16 @@ class WriteFileTool(BaseTool):
         if requested_path.is_symlink():
             # f"..." 是 f-string，花括号中的表达式会替换为实际值。
             # return 会立即结束这个方法，这里只返回拒绝提示，不会写文件。
-            return f"Cannot create file: path is a symbolic link: {args.path}"
+            return f"无法创建文件：路径是符号链接： {args.path}"
 
         # 路径可能指向一个目录；目录不能当成普通文本文件写入。
         if target.is_dir():
-            return f"Cannot create file: path is a directory: {args.path}"
+            return f"无法创建文件：路径是目录： {args.path}"
 
         # exists() 检查是否已经存在，提前给出清楚的拒绝覆盖提示。
         # 但检查和写入之间存在时间间隔，所以不能只依赖这一项保护。
         if target.exists():
-            return f"File already exists; not overwritten: {args.path}"
+            return f"文件已存在，未覆盖： {args.path}"
 
         # parent 是文件的父目录，例如 src/main.py 的父目录是 src。
         # mkdir() 创建目录；它不创建 main.py 文件。
@@ -139,7 +139,7 @@ class WriteFileTool(BaseTool):
         except FileExistsError:
             # FileExistsError 是 OSError 的一种，表示文件已经存在。
             # 到这里也不会改动那个已存在的文件。
-            return f"File already exists; not overwritten: {args.path}"
+            return f"文件已存在，未覆盖： {args.path}"
 
         # relative_to() 去掉工作区前缀，得到 src/main.py 这样的相对路径。
         # as_posix() 将显示的路径分隔符统一成 /，方便模型继续使用。
@@ -147,4 +147,4 @@ class WriteFileTool(BaseTool):
 
         # 这个返回值会作为 tool 消息发给模型，不一定原样打印到终端。
         # 只说明创建成功，不代表文件内的代码正确，也不代表测试通过。
-        return f"Created {relative_path} ({written_chars} characters)."
+        return f"已创建 {relative_path}，写入 {written_chars} 个字符。"

@@ -14,22 +14,22 @@ class ReadFileArgs(BaseModel):
 
     path: str = Field(
         description=(
-            "Relative path of the file to read, "
-            "for example: src/main.py"
+            "文件的工作区相对路径，"
+            "例如：src/main.py"
         )
     )
 
 
 class ReadFileTool(BaseTool):
     """
-    读取当前 Workspace 中的文件。
+    读取当前工作区中的文件。
     """
 
     name = "read_file"
 
     description = (
-        "Read the contents of a text file "
-        "inside the current workspace."
+        "读取工作区内文本文件的内容，"
+        "文件路径相对于工作区根目录。"
     )
 
     # 告诉 BaseTool：
@@ -95,23 +95,23 @@ class ReadFileTool(BaseTool):
         #最终要访问的这个文件，到底在不在我的工作目录（workspace）里面
         if not target.is_relative_to(self.workspace):
             raise ValueError(
-                "Cannot access files outside workspace."
+                "不能访问工作区之外的文件。"
             )
 
         # 文件不存在。
         if not target.exists():
-            return f"File not found: {args.path}"
+            return f"文件不存在： {args.path}"
 
         # 用户可能传入了一个目录，
         # read_file 只允许读取普通文件。
         if not target.is_file():
-            return f"Not a file: {args.path}"
+            return f"不是普通文件： {args.path}"
 
         # 读取文本内容,指定用什么编码解码
         #
         # errors="replace"：
         # 遇到不能正常解码的字符时不要直接崩溃。
-        return target.read_text(
-            encoding="utf-8",
-            errors="replace",
-        )
+        # newline="" 保留原始换行，让模型读到的多行文本能被 edit_file 精确匹配。
+        # 只读工具保留替换解码错误的行为；编辑工具仍严格解码，避免损坏原文。
+        with target.open("r", encoding="utf-8", errors="replace", newline="") as file:
+            return file.read()

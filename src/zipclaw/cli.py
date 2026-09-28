@@ -1,4 +1,4 @@
-# src/codeclaw/cli.py
+# src/zipclaw/cli.py
 
 import asyncio
 import os
@@ -20,7 +20,7 @@ async def main():
     load_dotenv()
 
     # 当前终端所在目录，
-    # 就作为 Agent Workspace。
+    # 就作为 智能体 工作区。
     #
     # 以后可以允许用户：
     #
@@ -28,18 +28,18 @@ async def main():
     workspace = Path.cwd()
     print(f"工作区:{workspace}")
 
-    # 创建 LLM。
+    # 创建 模型。
     llm = OpenAILLM(
         api_key=os.environ["OPENAI_API_KEY"],
         model=os.environ["OPENAI_MODEL"],
         base_url=os.getenv("OPENAI_BASE_URL"),
     )
 
-    # 创建 Agent 工具箱。
+    # 创建 智能体 工具箱。
     registry = ToolRegistry()
 
     # 先用 list_dir 发现文件路径，再用 read_file 读取内容。
-    # 注册后 registry.schemas() 会自动把两个工具的参数格式提供给模型。
+    # 注册后 registry.schemas() 会自动把所有工具的参数格式提供给模型。
     registry.register(
         ListDirTool(
             workspace=workspace
@@ -61,7 +61,7 @@ async def main():
         )
     )
 
-    # 创建 Agent。
+    # 创建 智能体。
     agent = AgentLoop(
         llm=llm,
         tools=registry,

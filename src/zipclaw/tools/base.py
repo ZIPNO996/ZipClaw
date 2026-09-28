@@ -8,7 +8,7 @@ from pydantic import BaseModel
 
 class BaseTool(ABC):
     """
-    所有 Agent Tool 的基类。
+    所有智能体工具的基类。
 
     例如未来会有：
 
@@ -21,7 +21,7 @@ class BaseTool(ABC):
 
     # 工具名称。
     #
-    # 这个名字会直接告诉 LLM。
+    # 这个名字会直接告诉 模型。
     #
     # 例如：
     # read_file
@@ -29,7 +29,7 @@ class BaseTool(ABC):
 
     # 工具说明。
     #
-    # LLM 会根据 description 判断：
+    # 模型 会根据 description 判断：
     # "我什么时候应该调用这个工具？"
     description: str
 
@@ -42,9 +42,9 @@ class BaseTool(ABC):
 
     def schema(self) -> dict:
         """
-        生成提供给 LLM 的 Tool Schema。
+        生成提供给模型的工具参数结构。
 
-        Pydantic 可以自动把参数模型转换成 JSON Schema，
+        Pydantic 可以自动把参数模型转换成 JSON 参数结构，
         所以我们不需要自己手写 properties / required。
         """
 
@@ -54,7 +54,7 @@ class BaseTool(ABC):
                 "name": self.name,
                 "description": self.description,
 
-                # Pydantic 自动生成 JSON Schema。
+                # Pydantic 自动生成 JSON 参数结构。
                 # 这里参数的description也会告知给模型。
                 "parameters": self.args_model.model_json_schema(),
             },
@@ -64,7 +64,7 @@ class BaseTool(ABC):
         """
         工具统一执行入口。
 
-        LLM 返回的是一个普通 dict：
+        模型参数解析后是一个普通字典：
 
         {
             "path": "main.py"
@@ -78,7 +78,7 @@ class BaseTool(ABC):
         args = self.args_model.model_validate(arguments)
 
         # 参数校验通过以后，
-        # 才进入具体 Tool 的 execute()。
+        # 才进入具体 工具 的 execute()。
         return await self.execute(args)
 
     @abstractmethod
@@ -86,7 +86,7 @@ class BaseTool(ABC):
         """
         真正执行工具。
 
-        每一个子 Tool 都必须自己实现。
+        每一个具体工具都必须自己实现。
         """
 
         ...

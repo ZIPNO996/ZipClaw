@@ -13,7 +13,7 @@ class ListDirArgs(BaseModel):
     # "." 表示工作区根目录；模型不传 path 也可以使用这个工具。
     path: str = Field(
         default=".",
-        description="Directory path relative to the workspace root, for example: src. Defaults to .",
+        description="目录的工作区相对路径，例如：src；默认 . 表示根目录。",
     )
 
     # ge / le 表示最小值和最大值，限制返回内容占用的上下文。
@@ -21,7 +21,7 @@ class ListDirArgs(BaseModel):
         default=100,
         ge=1,
         le=500,
-        description="Maximum number of entries to return, between 1 and 500.",
+        description="最多返回的条目数量，范围为 1 到 500，默认 100。",
     )
 
 
@@ -30,9 +30,9 @@ class ListDirTool(BaseTool):
 
     name = "list_dir"
     description = (
-        "List immediate files and subdirectories inside a workspace directory. "
-        "Does not recurse or read file contents. "
-        "Input and output paths are relative to the workspace root."
+        "列出工作区内指定目录的直接子项。"
+        "不递归展开子目录，也不读取文件内容。"
+        "输入和输出的路径均相对于工作区根目录。"
     )
     args_model = ListDirArgs
 
@@ -45,12 +45,12 @@ class ListDirTool(BaseTool):
         # resolve() 清理 ../ 并解析链接，再按实际路径检查边界。
         target = (self.workspace / args.path).resolve()
         if not target.is_relative_to(self.workspace):
-            raise ValueError("Cannot access directories outside workspace.")
+            raise ValueError("不能访问工作区之外的目录。")
 
         if not target.exists():
-            return f"Directory not found: {args.path}"
+            return f"目录不存在： {args.path}"
         if not target.is_dir():
-            return f"Not a directory: {args.path}"
+            return f"不是目录： {args.path}"
 
         # iterdir() 只列出当前一层，不会展开子目录。
         # 排序让输出稳定；这里只限制返回数量，排序仍会收集全部子项。
@@ -59,19 +59,19 @@ class ListDirTool(BaseTool):
             key=lambda entry: (entry.name.casefold(), entry.name),
         )
         if not entries:
-            return f"Empty directory: {args.path}"
+            return f"目录为空： {args.path}"
 
         lines = []
         for entry in entries[:args.max_entries]:
             # 单独标记符号链接和 Windows 目录联接，不读取链接目标内容。
             if entry.is_symlink() or entry.is_junction():
-                kind = "link"
+                kind = "链接"
             elif entry.is_dir():
-                kind = "dir"
+                kind = "目录"
             elif entry.is_file():
-                kind = "file"
+                kind = "文件"
             else:
-                kind = "other"
+                kind = "其他"
 
             # 返回 src/main.py，而非仅 main.py，模型可直接拿去调用 read_file。
             # as_posix() 将显示的路径分隔符统一为 /，不返回工作区绝对路径。
@@ -80,8 +80,8 @@ class ListDirTool(BaseTool):
 
         if len(entries) > args.max_entries:
             lines.append(
-                f"[truncated] Showing {args.max_entries} of {len(entries)} entries. "
-                "Increase max_entries (up to 500) to show more."
+                f"[已截断] 共 {len(entries)} 项，仅显示前 {args.max_entries} 项。"
+                "可增大 max_entries 查看更多，最大为 500；也可以查看子目录。"
             )
 
         # 每个子项占一行；权限等 OSError 由 AgentLoop 已有的异常处理接住。

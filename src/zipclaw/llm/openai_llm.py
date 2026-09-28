@@ -10,7 +10,7 @@ from .types import LLMResponse, ToolCall
 
 class OpenAILLM(BaseLLM):
     """
-    OpenAI-compatible LLM Adapter。
+    兼容 OpenAI 消息协议的模型适配器。
 
     OpenAI、部分第三方模型接口都可以走类似协议。
     """
@@ -35,14 +35,14 @@ class OpenAILLM(BaseLLM):
         tools: list[dict] | None = None,
     ) -> LLMResponse:
 
-        # 请求 LLM。
+        # 请求 模型。
         response = await self.client.chat.completions.create(
             model=self.model,
             messages=messages,
             tools=tools,
         )
 
-        # 第一版默认只处理第一个 choice。
+        # 第一版只处理响应中的第一个候选回答（choice）。
         message = response.choices[0].message
 
         tool_calls: list[ToolCall] = []
@@ -67,13 +67,13 @@ class OpenAILLM(BaseLLM):
                     )
                 )
 
-        # OpenAI Response 到这里就结束了。
+        # 模型服务的响应转换到这里完成。
         #
         # 外面的 AgentLoop 只会看到 LLMResponse，
         # 不会知道这是 OpenAI SDK 返回的。
         return LLMResponse(
             content=message.content,
-            #deepseek思考模式下的toolcalling要求回传思考内容
+            # DeepSeek 思考模式下的工具调用要求回传原始推理内容。
             reasoning_content=getattr(message, "reasoning_content", None),
             tool_calls=tool_calls,
         )
