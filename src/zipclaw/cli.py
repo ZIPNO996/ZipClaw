@@ -12,6 +12,7 @@ from .tools.filesystem.list_dir import ListDirTool
 from .tools.filesystem.read_file import ReadFileTool
 from .tools.filesystem.write_file import WriteFileTool
 from .tools.filesystem.edit_file import EditFileTool
+from .tools.filesystem.grep import GrepTool
 from .tools.registry import ToolRegistry
 
 
@@ -57,6 +58,11 @@ async def main():
     )
     registry.register(
         EditFileTool(
+            workspace=workspace
+        )
+    )
+    registry.register(
+        GrepTool(
             workspace=workspace
         )
     )

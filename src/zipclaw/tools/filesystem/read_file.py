@@ -34,6 +34,7 @@ class ReadFileTool(BaseTool):
 
     # 告诉 BaseTool：
     # 这个工具使用 ReadFileArgs 验证参数。
+    #参考base.py对此处的解释
     args_model = ReadFileArgs
 
     def __init__(self, workspace: Path):
