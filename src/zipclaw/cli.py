@@ -10,6 +10,7 @@ from .core.loop import AgentLoop
 from .llm.openai_llm import OpenAILLM
 from .tools.filesystem.list_dir import ListDirTool
 from .tools.filesystem.read_file import ReadFileTool
+from .tools.filesystem.write_file import WriteFileTool
 from .tools.registry import ToolRegistry
 
 
@@ -45,6 +46,11 @@ async def main():
     )
     registry.register(
         ReadFileTool(
+            workspace=workspace
+        )
+    )
+    registry.register(
+        WriteFileTool(
             workspace=workspace
         )
     )
@@ -84,5 +90,10 @@ async def main():
         print(f"\nZipClaw > {result}")
 
 
-if __name__ == "__main__":
+def entrypoint():
+    """命令行入口：启动异步主程序。"""
     asyncio.run(main())
+
+
+if __name__ == "__main__":
+    entrypoint()

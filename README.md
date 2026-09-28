@@ -22,19 +22,31 @@
 
 ## 快速开始
 
-以下命令以 Windows PowerShell 为例，在 ZipClaw 项目根目录执行。
+以下命令以 Windows PowerShell 为例。推荐先把项目安装为 `zipclaw` 命令，以后在任意目标项目目录启动。
 
 ### 1. 准备环境
 
-需要 Python 3.12 或更新版本，以及可用的模型 API Key。使用的模型需要支持工具调用。
+需要 uv、Python 3.12 或更新版本，以及可用的模型 API Key。使用的模型需要支持工具调用。
 
-如果已经安装 uv，可以创建项目虚拟环境并同步依赖：
+安装一次命令（路径替换为你自己的 ZipClaw 源码目录）：
 
 ```powershell
-uv sync
+uv tool install --editable "C:\Users\28657\Desktop\ZipClaw"
+uv tool update-shell
 ```
 
-当前项目尚未显式配置构建后端、可编辑安装与命令行入口。下面通过 `PYTHONPATH` 明确指定源码位置，不依赖项目包是否已被安装。
+- `uv tool install` 为工具管理独立环境、安装依赖并生成命令，不使用项目的 `.venv`，也不是发布或上传项目。
+- `--editable` 让命令使用这份本地源码，修改 Python 文件后无需重新安装。
+- `uv tool update-shell` 按需更新 PATH，让终端能找到命令。首次设置后重新打开终端。
+
+项目已经配置 setuptools 构建后端、`src` 包发现及命令入口：
+
+```toml
+[project.scripts]
+zipclaw = "zipclaw.cli:entrypoint"
+```
+
+执行 `zipclaw` 会调用同步函数 `entrypoint()`，由它通过 `asyncio.run(main())` 启动异步 CLI。
 
 ### 2. 配置环境变量
 
@@ -60,16 +72,13 @@ CLI 使用 `load_dotenv()` 加载配置。已有的进程环境变量通常会�
 
 ### 3. 启动
 
-在项目根目录执行：
+安装完成后，在想让 Agent 操作的目录执行：
 
 ```powershell
-$env:PYTHONPATH = (Join-Path (Get-Location).Path "src")
-.\.venv\Scripts\python.exe -m zipclaw.cli
+zipclaw
 ```
 
-这里使用 `-m zipclaw.cli` 按包启动，保证源码中的相对导入正常工作。不要直接运行 `src/zipclaw/cli.py`。
-
-`PYTHONPATH` 设置只影响当前 PowerShell 会话；新开终端时需要重新设置。使用虚拟环境解释器的完整路径，不需要先激活虚拟环境。
+可以和Claude一样，直接在终端输入zipclaw即可
 
 ### 4. 试一次工具调用
 
@@ -85,6 +94,31 @@ ZipClaw > ……
 
 工具结果会进入模型上下文，终端默认显示模型的最终回答，不会直接打印全部工具返回值。因此“读取文件”可能得到总结，而不是逐字原文。
 
+### 修改源码后如何生效
+
+可编辑安装后，修改 `.py` 文件，只需在正在运行的 ZipClaw 中输入 `exit`，然后回到 PowerShell 再执行 `zipclaw`。新进程会加载更新后的源码；原来进程不会自动热更新。
+
+不需要重新打开终端，也不需要每次修改都运行安装命令。因为历史仅保存在内存中，重启后会开启新对话。
+
+如果修改了依赖、包配置或命令入口，可以重新安装工具环境：
+
+```powershell
+uv tool install --force --editable "C:\Users\28657\Desktop\ZipClaw"
+```
+
+可编辑安装依赖原源码目录。移动目录后应按新路径重新安装，不要直接删除源码目录。
+
+### 可选：使用项目本地环境开发
+
+如果不需要用户级 `zipclaw` 命令，也可以在 ZipClaw 根目录执行：
+
+```powershell
+uv sync
+.\.venv\Scripts\python.exe -m zipclaw.cli
+```
+
+`uv sync` 管理项目 `.venv`，与 `uv tool install` 管理的工具环境是两套环境。更新其中一套的依赖，不代表另一套同步更新。这里仍按包启动，不要直接运行 `src/zipclaw/cli.py`。
+
 ## 聊天命令
 
 | 输入 | 行为 |
@@ -94,7 +128,7 @@ ZipClaw > ……
 | `exit` 或 `quit` | 退出程序，大小写均可 |
 | 空输入 | 忽略，不调用模型 |
 
-注意：当前只有 **`/clear`** 是清空命令。输入 `clear` 或“请清空上下文”仍然是普通聊天；即使模型回复“已清空”，也不意味着程序真的删除了历史。
+注意：当前只有 **`/clear`** 是清空命令。
 
 历史只保存在内存中，退出后不会恢复。清空对话不会删除工作区文件，模型之后仍可通过工具重新读取文件。
 
@@ -104,25 +138,23 @@ ZipClaw > ……
 
 模型使用相对于工作区根目录的路径，例如 `src/main.py`。工具负责拼接路径并检查是否越界。代码当前限制的是“不能访问工作区外”，并未单独禁止工作区内的绝对路径输入。
 
-要分析其他项目，可以先保存 ZipClaw 的路径，再切换目录运行：
+安装命令后，要分析其他项目，只需切换目录运行：
 
 ```powershell
-# 先在 ZipClaw 根目录执行。
-$zipclawRoot = (Get-Location).Path
-$env:PYTHONPATH = Join-Path $zipclawRoot "src"
-
 # 替换成要分析的项目目录。
 Set-Location "C:\path\to\another-project"
-& (Join-Path $zipclawRoot ".venv\Scripts\python.exe") -m zipclaw.cli
+zipclaw
 ```
 
-当前 CLI 没有显式指定 `.env` 路径。普通模块启动时，`load_dotenv()` 通常从调用它的源码位置向上查找，不要假定切换工作区就一定会加载目标项目的 `.env`；可继续使用 ZipClaw 根目录配置或启动进程的环境变量。
+安装位置决定运行哪个程序，启动目录决定操作哪个工作区。这个启动方式不会解除工具的工作区访问限制。
+
+当前 CLI 没有显式指定 `.env` 路径。可编辑安装、普通非调试启动时，`load_dotenv()` 从调用它的源码位置向上查找，可继续使用 ZipClaw 根目录的 `.env` 或启动进程的环境变量。不要假定切换工作区就会加载目标项目的 `.env`。
 
 ## 项目结构
 
 ```text
 ZipClaw/
-├── pyproject.toml              # 项目元数据、依赖与 uv 索引配置
+├── pyproject.toml              # 依赖、构建配置、命令入口与 uv 索引
 ├── uv.lock                     # uv 依赖锁定文件
 ├── README.md
 └── src/
@@ -228,7 +260,7 @@ flowchart TD
 
 ## 后续方向（尚未实现）
 
-1. 补充自动化测试、稳定启动配置、读取上限与更清楚的失败提示。
+1. 补充自动化测试、读取上限与更清楚的失败提示。
 2. 增加搜索、文件编辑等工具，并在写入前加入确认和变更检查。
 3. 增加受控命令执行、测试与修复闭环。
 4. 按实际需要加入会话持久化、上下文管理和更多模型适配。
