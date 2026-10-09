@@ -110,6 +110,18 @@ class AgentLoop:
                 tools=self.tools.schemas(),
             )
 
+            #开关控制推理文本的显示
+            show_reasoning = True
+
+            # 读取模型服务返回的推理文本。
+            reasoning = response.reasoning_content
+
+            # 并不是每个模型、每次响应都会提供这个字段。
+            if show_reasoning:
+                if reasoning:
+                    print("\n[模型返回的思考过程]", flush=True)
+                    print(reasoning, flush=True)
+
             # ==========================
             # 情况 1：模型 不调用工具
             # ==========================
@@ -166,7 +178,7 @@ class AgentLoop:
             # 再逐个执行工具，将结果与调用 ID 对应起来。
             for call in response.tool_calls:
 
-                
+
                 print(f"\n[调用工具] {call.name}", flush=True)
 
                 # 参数是字典，转换成 JSON 字符串后方便展示。
