@@ -93,7 +93,16 @@ class AgentLoop:
         # 智能体循环。
         #
         # 每循环一次，可以认为 智能体 做了一步。
-        for _ in range(self.max_steps):
+        for step_index in range(self.max_steps):
+
+            #range()从0开始，当前步数为循环轮次加一
+            current_step = step_index + 1
+
+            #flush=True表示立即输出
+            print(
+                f"\n[第 {current_step}/{self.max_steps} 轮] 正在请求模型……",
+                flush=True,
+            )
 
             # 把当前消息和 工具参数说明 全部交给 模型。
             response = await self.llm.chat(
@@ -156,6 +165,28 @@ class AgentLoop:
 
             # 再逐个执行工具，将结果与调用 ID 对应起来。
             for call in response.tool_calls:
+
+                
+                print(f"\n[调用工具] {call.name}", flush=True)
+
+                # 参数是字典，转换成 JSON 字符串后方便展示。
+                # ensure_ascii=False 让中文直接显示。
+                arguments_text = json.dumps(
+                    call.arguments,
+                    ensure_ascii=False,
+                )
+
+                # 写文件的参数可能包含整段代码，因此只展示前 300 个字符。
+                if len(arguments_text) > 300:
+                    arguments_preview = arguments_text[:300]
+                    arguments_preview += "……[参数显示已截断]"
+                else:
+                    arguments_preview = arguments_text
+
+                print(f"[参数] {arguments_preview}", flush=True)
+
+
+
                 try:
                     result = await self.tools.execute(
                         name=call.name,
@@ -198,6 +229,22 @@ class AgentLoop:
                 except OSError:
                     # 文件权限不足、文件在读取前被删除等。
                     content = "文件操作失败，请检查路径、文件是否存在及访问权限。"
+
+
+
+                # content 此时已经是工具的执行结果，或者异常处理生成的错误提示。
+                # 这里限制终端显示长度，避免读取整个文件时刷满屏幕。
+                if len(content) > 500:
+                    result_preview = content[:500]
+                    result_preview += "\n……[结果显示已截断]"
+                else:
+                    result_preview = content
+
+                print("[工具结果]", flush=True)
+                print(result_preview, flush=True)
+
+
+
 
                 # 无论成功还是失败，都给本次调用一个结果。
                 messages.append({
