@@ -15,6 +15,7 @@ from .tools.filesystem.edit_file import EditFileTool
 from .tools.filesystem.grep import GrepTool
 from .tools.shell.run_command import RunCommandTool
 from .tools.registry import ToolRegistry
+from .error.custom_errors import AgentStepLimitError
 
 
 async def main():
@@ -104,7 +105,16 @@ async def main():
             print("对话已清空。")
             continue
 
-        result = await agent.run(task)
+        try:
+            result = await agent.run(task)
+
+        except AgentStepLimitError as exc:
+            print(f"\n[任务停止] {exc}")
+            print("你可以继续补充要求，或输入 /clear 开始新对话。")
+
+            # 回到 while 循环开头，继续等待输入。
+            continue
+
         print(f"\nZipClaw > {result}")
 
 

@@ -4,6 +4,7 @@ import json
 from ..llm.base import BaseLLM
 from ..tools.registry import ToolRegistry
 from pydantic import ValidationError
+from ..error.custom_errors import AgentStepLimitError
 
 class AgentLoop:
     """
@@ -267,6 +268,7 @@ class AgentLoop:
 
         # 如果循环次数超过限制，
         # 很可能 智能体 出现死循环。
-        raise RuntimeError(
-            "已达到智能体的最大执行步数。"
+        raise AgentStepLimitError(
+            f"已达到 {self.max_steps} 轮执行上限，当前任务已停止，"
+            "完成情况需要进一步确认。"
         )
