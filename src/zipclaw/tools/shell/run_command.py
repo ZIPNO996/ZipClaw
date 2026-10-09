@@ -17,11 +17,22 @@ class RunCommandArgs(BaseModel):
         ),
     )
 
+    #ge:Greater than or Equal to    le:Less than or Equal to
     timeout: int = Field(
         default=30,
         ge=1,
         le=120,
         description="最多等待多少秒，默认 30 秒，最大 120 秒。",
+    )
+
+    max_output_chars: int = Field(
+        default=8000,
+        ge=1,
+        le=20000,
+        description=(
+            "正常输出和错误输出各自最多显示的字符数。"
+            "默认 8000，范围为 1 到 20000。"
+        ),
     )
 
 
@@ -36,6 +47,7 @@ class RunCommandTool(BaseTool):
         "返回退出码、正常输出和错误输出。"
         "可以用于运行脚本、执行测试或查看 Git 差异。"
         "请将程序和参数分别放进列表，不要传入整条命令字符串。"
+        "输出过长时会截断：正常输出保留开头，错误输出保留末尾。"
     )
 
     args_model = RunCommandArgs
@@ -81,7 +93,7 @@ class RunCommandTool(BaseTool):
 
                 encoding="utf-8",
 
-                # 使用默认文本编码；解码失败的字符用替代符显示。
+                # 按 UTF-8 解码；解码失败的字符用替代符显示。
                 errors="replace",
 
                 # 超过指定时间时抛出 TimeoutExpired。
@@ -116,6 +128,39 @@ class RunCommandTool(BaseTool):
             # 没有输出时给一个明确的提示。
         stdout = result.stdout
         stderr = result.stderr
+
+        # 保存用户指定的长度上限。
+        output_limit = args.max_output_chars
+
+        # 正常输出：保留开头。
+        stdout_length = len(stdout)
+
+        if stdout_length > output_limit:
+            omitted_chars = stdout_length - output_limit
+
+            # [:output_limit] 表示取前 output_limit 个字符。
+            stdout = stdout[:output_limit]
+
+            stdout += (
+                f"\n……[正常输出已截断，"
+                f"省略了后面的 {omitted_chars} 个字符]"
+            )
+
+        # 错误输出：保留末尾，方便看到最后的错误类型和原因。
+        stderr_length = len(stderr)
+
+        if stderr_length > output_limit:
+            omitted_chars = stderr_length - output_limit
+
+            # [-output_limit:] 表示取最后 output_limit 个字符。
+            stderr_tail = stderr[-output_limit:]
+
+            truncation_message = (
+                f"[错误输出已截断，"
+                f"省略了前面的 {omitted_chars} 个字符]\n"
+            )
+
+            stderr = truncation_message + stderr_tail
 
         if not stdout:
             stdout = "（无）"
