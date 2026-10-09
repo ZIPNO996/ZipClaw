@@ -16,7 +16,7 @@ from .tools.filesystem.edit_file import EditFileTool
 from .tools.filesystem.grep import GrepTool
 from .tools.shell.run_command import RunCommandTool
 from .tools.registry import ToolRegistry
-from .error.custom_errors import AgentStepLimitError
+from .error.custom_errors import AgentStepLimitError,ModelRequestError,ModelResponseError
 from .core.session import SessionStore
 
 
@@ -157,6 +157,15 @@ async def main():
             print("对话已清空，已保存的历史也已同步清空。")
             continue
 
+        # try:
+        #     # 可能出错的代码
+        #     ...
+        # except 某种异常:
+        #     # 出错时执行
+        #     ...
+        # else:
+        #     # 没出错时才执行
+        #     ...
         try:
             result = await agent.run(task)
 
@@ -164,8 +173,23 @@ async def main():
             print(f"\n[任务停止] {exc}")
             print("你可以继续补充要求，或输入 /clear 开始新对话。")
 
-            # 这里不写 continue。
-            # 达到上限后，也需要继续执行下面的保存操作。
+        except ModelRequestError as exc:
+            # exc 中保存着适配器传出来的中文说明。
+            print(f"\n[模型请求失败] {exc}")
+
+            # 只是提示用户，不会自动重新发送请求。
+            print("本次任务已停止，程序没有退出。")
+            print("你可以继续输入，或输入 /clear 清空对话。")
+
+        except ModelResponseError as exc:
+            print(f"\n[模型响应无效] {exc}")
+            print("本次任务已停止，程序没有退出。")
+            print("你可以继续输入，或输入 /clear 清空对话。")
+
+
+            # 不清空历史，也不伪造一条模型回答。
+            # 此前已经执行的工具和对应结果仍然保留。
+            # 这里不写 continue，让下面的保存操作继续执行。
 
         else:
             # try 没有抛出异常时，才进入 else。
