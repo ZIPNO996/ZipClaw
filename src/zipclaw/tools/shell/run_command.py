@@ -79,6 +79,8 @@ class RunCommandTool(BaseTool):
                 # 将输出解码成字符串。
                 text=True,
 
+                encoding="utf-8",
+
                 # 使用默认文本编码；解码失败的字符用替代符显示。
                 errors="replace",
 
