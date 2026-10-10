@@ -28,6 +28,8 @@ class AgentLoop:
         llm: BaseLLM,
         tools: ToolRegistry,
         max_steps: int = 10,
+        show_tool_logs: bool = False,
+        show_reasoning: bool = True,
     ):
         # 使用哪个 模型。
         self.llm = llm
@@ -40,6 +42,16 @@ class AgentLoop:
         # 防止模型进入死循环，
         # 一直调用工具停不下来。
         self.max_steps = max_steps
+
+        # 控制工具日志是否显示。
+        # True：显示工具名称、参数预览和结果预览。
+        # False：隐藏这些日志，但工具仍然正常执行并记录到对话历史。
+        # 操作前的确认提示单独显示，不受这个开关影响。
+        self.show_tool_logs = show_tool_logs
+
+        # 开关控制推理文本的显示
+        self.show_reasoning = show_reasoning
+
         self.messages: list[dict] = [
             {
                 "role": "system",
@@ -162,14 +174,12 @@ class AgentLoop:
                 tools=self.tools.schemas(),
             )
 
-            #开关控制推理文本的显示
-            show_reasoning = True
 
             # 读取模型服务返回的推理文本。
             reasoning = response.reasoning_content
 
             # 并不是每个模型、每次响应都会提供这个字段。
-            if show_reasoning:
+            if self.show_reasoning:
                 if reasoning:
                     print("\n[模型返回的思考过程]", flush=True)
                     print(reasoning, flush=True)
@@ -231,23 +241,25 @@ class AgentLoop:
             for call in response.tool_calls:
 
 
-                print(f"\n[调用工具] {call.name}", flush=True)
+                # 关闭日志时，不需要生成用于展示的参数预览。
+                if self.show_tool_logs:
+                    print(f"\n[调用工具] {call.name}", flush=True)
 
-                # 参数是字典，转换成 JSON 字符串后方便展示。
-                # ensure_ascii=False 让中文直接显示。
-                arguments_text = json.dumps(
-                    call.arguments,
-                    ensure_ascii=False,
-                )
+                    # 参数是字典，转换成 JSON 字符串后方便展示。
+                    # ensure_ascii=False 让中文直接显示。
+                    arguments_text = json.dumps(
+                        call.arguments,
+                        ensure_ascii=False,
+                    )
 
-                # 写文件的参数可能包含整段代码，因此只展示前 300 个字符。
-                if len(arguments_text) > 300:
-                    arguments_preview = arguments_text[:300]
-                    arguments_preview += "……[参数显示已截断]"
-                else:
-                    arguments_preview = arguments_text
+                    # 写文件的参数可能包含整段代码，因此只展示前 300 个字符。
+                    if len(arguments_text) > 300:
+                        arguments_preview = arguments_text[:300]
+                        arguments_preview += "……[参数显示已截断]"
+                    else:
+                        arguments_preview = arguments_text
 
-                print(f"[参数] {arguments_preview}", flush=True)
+                    print(f"[参数] {arguments_preview}", flush=True)
 
                 try:
                     # 先判断本次调用是否获得执行许可。
@@ -312,15 +324,17 @@ class AgentLoop:
 
 
                 # content 此时已经是工具的执行结果，或者异常处理生成的错误提示。
-                # 这里限制终端显示长度，避免读取整个文件时刷满屏幕。
-                if len(content) > 500:
-                    result_preview = content[:500]
-                    result_preview += "\n……[结果显示已截断]"
-                else:
-                    result_preview = content
+                # 开关只控制终端显示；下方仍然会保存完整的工具结果。
+                if self.show_tool_logs:
+                    # 限制终端显示长度，避免读取整个文件时刷满屏幕。
+                    if len(content) > 500:
+                        result_preview = content[:500]
+                        result_preview += "\n……[结果显示已截断]"
+                    else:
+                        result_preview = content
 
-                print("[工具结果]", flush=True)
-                print(result_preview, flush=True)
+                    print("[工具结果]", flush=True)
+                    print(result_preview, flush=True)
 
 
 
