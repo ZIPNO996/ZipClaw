@@ -57,6 +57,57 @@ class AgentLoop:
             }
         ]
 
+    def confirm_tool_call(
+        self,
+        name: str,
+        arguments: dict,
+    ) -> bool:
+        """决定是否允许本次工具调用。"""
+
+        # 这些工具只读取信息，不修改文件，也不执行命令。
+        # 它们可以直接运行，不需要用户确认。
+        read_only_tools = {
+            "read_file",
+            "list_dir",
+            "grep",
+        }
+
+        if name in read_only_tools:
+            return True
+
+        # 其它工具都需要确认。
+        # 以后新增工具时，如果忘记分类，也不会直接自动执行。
+        print("\n[等待确认]", flush=True)
+        print(f"工具名称：{name}", flush=True)
+
+        # 前面的日志只展示参数的前 300 个字符。
+        # 确认操作时，展示完整参数，方便用户检查实际要做什么。
+        arguments_text = json.dumps(
+            arguments,
+            ensure_ascii=False,
+            indent=2,
+        )
+
+        print("本次操作的完整参数：", flush=True)
+        print(arguments_text, flush=True)
+
+        try:
+            answer = input("允许执行吗？输入 y 同意，直接回车拒绝 [y/N]：")
+        except (EOFError, KeyboardInterrupt):
+            # 无法读取输入，或者用户在确认时按下 Ctrl+C，
+            # 都不能当成同意执行。
+            print("\n本次操作未获得确认，已拒绝。", flush=True)
+            return False
+
+        # 去掉前后空格，再统一转换成小写。大小写不敏感。
+        answer = answer.strip().lower()
+
+        # 只有明确输入 y 或 yes，才允许执行。
+        if answer == "y" or answer == "yes":
+            return True
+
+        return False
+
     async def run(
         self,
         task: str,
@@ -198,14 +249,29 @@ class AgentLoop:
 
                 print(f"[参数] {arguments_preview}", flush=True)
 
-
-
                 try:
-                    result = await self.tools.execute(
+                    # 先判断本次调用是否获得执行许可。
+                    allowed = self.confirm_tool_call(
                         name=call.name,
                         arguments=call.arguments,
                     )
-                    content = str(result)
+
+                    if allowed:
+                        # 只有允许执行，才真正调用工具。
+                        result = await self.tools.execute(
+                            name=call.name,
+                            arguments=call.arguments,
+                        )
+                        content = str(result)
+
+                    else:
+                        # 没有执行工具，也要生成对应的工具结果。
+                        # 让模型知道：这次操作被拒绝，而不是执行成功。
+                        content = (
+                            "本次工具调用未获得用户确认，未执行任何操作。"
+                            "请向用户说明，不要自行重试或改用其它工具"
+                            "完成同一项被拒绝的操作。"
+                        )
 
                 except ValidationError as exc:
                     # 工具参数不符合 Pydantic 模型要求。
