@@ -6,6 +6,7 @@ from ..tools.registry import ToolRegistry
 from pydantic import ValidationError
 from ..error.custom_errors import AgentStepLimitError,ModelResponseError,ModelRequestError
 from .context import count_context_chars,split_context,summarize_history
+from .session import SessionStore
 
 class AgentLoop:
     """
@@ -31,7 +32,8 @@ class AgentLoop:
         max_steps: int = 10,
         show_tool_logs: bool = False,
         show_reasoning: bool = True,
-        context_char_budget: int = 20000,
+        context_char_budget: int = 60000,
+        session_store: SessionStore | None = None,
     ):
         # 使用哪个 模型。
         self.llm = llm
@@ -60,6 +62,9 @@ class AgentLoop:
             raise ValueError("上下文字符预算必须大于 0。")
 
         self.context_char_budget = context_char_budget
+
+        # 压缩历史之前，通过它保存原始记录的归档。
+        self.session_store = session_store
 
         self.messages: list[dict] = [
             {
@@ -135,6 +140,13 @@ class AgentLoop:
     ) -> None:
         """尝试压缩旧历史，成功且变短后才替换原记录。"""
 
+        if self.session_store is None:
+            print(
+                "[上下文] 未配置会话存储，跳过历史压缩。",
+                flush=True,
+            )
+            return
+
         # 保留最近两组对话，包括当前正在执行的任务。
         system_messages, old_messages, recent_messages = split_context(
             messages=self.messages,
@@ -202,6 +214,25 @@ class AgentLoop:
                 flush=True,
             )
             return
+
+        # 此时已经确认摘要有效，而且确实缩短了上下文。
+        # 先保存替换前的完整消息列表。
+        try:
+            archive_path = self.session_store.archive(
+                messages=self.messages,
+            )
+        except (OSError, TypeError, ValueError) as exc:
+            # 归档没有成功，就不替换内存中的历史。
+            print(
+                f"[上下文] 归档失败，取消本次压缩：{exc}",
+                flush=True,
+            )
+            return
+
+        print(
+            f"[上下文] 压缩前的历史已归档：{archive_path}",
+            flush=True,
+        )
 
         # 修改原列表的内容，保持列表对象不变。
         # run() 中的 messages 也引用这个列表，因此会同步看到变化。

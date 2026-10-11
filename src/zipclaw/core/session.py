@@ -1,5 +1,7 @@
 import json
 from pathlib import Path
+from datetime import datetime, timezone
+from uuid import uuid4
 
 
 class SessionStore:
@@ -104,3 +106,37 @@ class SessionStore:
                 )
 
         return messages
+
+    def archive(self, messages: list[dict]) -> Path:
+        """将当前历史保存为独立归档，并返回归档路径。"""
+
+        # 每个工作区的归档放进单独的目录。
+        # stem 是当前会话文件不带 .json 的文件名，
+        # 在你的项目里，就是工作区的哈希标识。
+        archive_directory = (
+            self.file_path.parent
+            / "archives"
+            #self.file_path.stem 得到的是不带最后一个扩展名的文件名，类型是字符串。
+            #哈希标识是唯一的，因为cli加载的SessionStore对象是确定的
+            / self.file_path.stem
+        )
+
+        # 使用 UTC 时间命名，Z 表示 UTC。
+        timestamp = datetime.now(timezone.utc).strftime(
+            "%Y%m%dT%H%M%S_%fZ"
+        )
+
+        # 再加一个随机标识，避免多次归档使用相同的文件名。
+        unique_id = uuid4().hex
+
+        archive_name = f"{timestamp}_{unique_id}.json"
+        archive_path = archive_directory / archive_name
+
+        # 复用现有保存逻辑：
+        # 先写临时文件，写完后再替换为正式文件。
+        # 创建的是另一个 SessionStore，不会改变当前会话文件路径。
+        archive_store = SessionStore(archive_path)
+        archive_store.save(messages)
+
+        # 只有保存成功，才返回归档路径。
+        return archive_path

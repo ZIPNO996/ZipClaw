@@ -97,6 +97,7 @@ async def main():
     agent = AgentLoop(
         llm=llm,
         tools=registry,
+        session_store=session_store,
     )
 
     try:
