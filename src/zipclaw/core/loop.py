@@ -341,20 +341,83 @@ class AgentLoop:
             # )
 
             # 统计和请求使用同一份工具说明。
-            response = await self.llm.chat(
-                messages=messages,
-                tools=tool_schemas,
-            )
+            # 每轮请求都重新等待一个完整响应。
+            # 收到完成事件之前，不保存助手消息、不执行工具。
+            response = None
+
+            # 记录最近显示的是正文还是推理文本。
+            # 同一类片段连续到达时，不重复打印标题。
+            last_output_type = None
 
 
-            # 读取模型服务返回的推理文本。
-            reasoning = response.reasoning_content
+            try:
+                async for event in self.llm.stream(
+                    messages=messages,
+                    tools=tool_schemas,
+                ):
+                    # 完成事件应该是最后一个事件。
+                    if response is not None:
+                        raise ModelResponseError(
+                            "模型在完成事件之后继续返回了事件。"
+                        )
 
-            # 并不是每个模型、每次响应都会提供这个字段。
-            if self.show_reasoning:
-                if reasoning:
-                    print("\n[模型返回的思考过程]", flush=True)
-                    print(reasoning, flush=True)
+                    if event.type == "reasoning_delta":
+                        if self.show_reasoning and event.text:
+                            # 从其它内容切换到推理文本时，显示标题。
+                            if last_output_type != "reasoning":
+                                print(
+                                    "\n[模型返回的思考过程]",
+                                    flush=True,
+                                )
+
+                            # 不自动换行，将多个片段连续显示。
+                            print(
+                                event.text,
+                                end="",
+                                flush=True,
+                            )
+
+                            last_output_type = "reasoning"
+
+                    elif event.type == "text_delta":
+                        if event.text:
+                            # 第一段正文到达时，显示回答前缀。
+                            if last_output_type != "text":
+                                print(
+                                    "\nZipClaw > ",
+                                    end="",
+                                    flush=True,
+                                )
+
+                            print(
+                                event.text,
+                                end="",
+                                flush=True,
+                            )
+
+                            last_output_type = "text"
+
+                    elif event.type == "response_completed":
+                        # 完整正文、推理文本、工具调用都在这里。
+                        # 后面继续使用原来的保存和工具执行逻辑。
+                        response = event.response
+
+                    else:
+                        raise ModelResponseError(
+                            "模型适配器返回了未知的流式事件。"
+                        )
+
+            finally:
+                # 正常结束或发生异常，都先结束当前输出行。
+                # 避免后续错误提示或工具日志挤在回答末尾。
+                if last_output_type is not None:
+                    print(flush=True)
+
+            # 没有完成事件，就不能把部分输出当作完整响应使用。
+            if response is None:
+                raise ModelResponseError(
+                    "未收到完整响应，本轮工具不会执行。"
+                )
 
             # ==========================
             # 情况 1：模型 不调用工具

@@ -22,7 +22,7 @@ sys.path.insert(0, str(project_root / "src"))
 from zipclaw.core.loop import AgentLoop
 from zipclaw.error.custom_errors import AgentStepLimitError
 from zipclaw.llm.base import BaseLLM
-from zipclaw.llm.types import LLMResponse, ToolCall
+from zipclaw.llm.llm_types import LLMResponse, ToolCall
 from zipclaw.tools.base import BaseTool
 from zipclaw.tools.filesystem.edit_file import EditFileTool
 from zipclaw.tools.filesystem.read_file import ReadFileTool

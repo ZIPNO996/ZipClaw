@@ -2,7 +2,8 @@
 
 from abc import ABC, abstractmethod
 
-from .types import LLMResponse
+from .llm_types import LLMResponse,LLMStreamEvent,TextDeltaEvent,ReasoningDeltaEvent,ResponseCompletedEvent
+from collections.abc import AsyncIterator
 
 #ABC:抽象基类
 #@abstractmethod 负责贴标签，ABC 负责让检查生效。
@@ -46,3 +47,42 @@ class BaseLLM(ABC):
         """
 
         ...
+
+    async def stream(
+        self,
+        messages: list[dict],
+        tools: list[dict] | None = None,
+    ) -> AsyncIterator[LLMStreamEvent]:
+        """
+        逐个返回模型响应事件。
+
+        默认实现先等待 chat() 返回完整结果，
+        再将结果转换成事件。
+
+        具体模型适配器可以覆盖这个方法，
+        实现真正的边接收、边返回。
+        """
+
+        # 复用当前已经实现的普通请求。
+        response = await self.chat(
+            messages=messages,
+            tools=tools,
+        )
+
+        # 如果有推理文本，先返回推理事件。
+        if response.reasoning_content:
+            yield ReasoningDeltaEvent(
+                text=response.reasoning_content,
+            )
+
+        # 如果有正文，再返回正文事件。
+        if response.content:
+            yield TextDeltaEvent(
+                text=response.content,
+            )
+
+        # 最后返回完整响应。
+        # 即使没有正文、只有工具调用，也需要这个事件。
+        yield ResponseCompletedEvent(
+            response=response,
+        )

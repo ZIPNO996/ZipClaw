@@ -168,7 +168,10 @@ async def main():
         #     # 没出错时才执行
         #     ...
         try:
-            result = await agent.run(task)
+            # result = await agent.run(task)
+            #流式输出已打印
+            # 回答已经由核心循环逐段显示。
+            await agent.run(task)
 
         except AgentStepLimitError as exc:
             print(f"\n[任务停止] {exc}")
@@ -192,10 +195,11 @@ async def main():
             # 此前已经执行的工具和对应结果仍然保留。
             # 这里不写 continue，让下面的保存操作继续执行。
 
-        else:
-            # try 没有抛出异常时，才进入 else。
-            # 避免达到上限后，使用一个不存在的 result。
-            print(f"\nZipClaw > {result}")
+        # 流式输出，不再需要else
+        # else:
+        #     # try 没有抛出异常时，才进入 else。
+        #     # 避免达到上限后，使用一个不存在的 result。
+        #     print(f"\nZipClaw > {result}")
 
         # 正常完成、达到步数上限，两种情况都保存历史。
         try:

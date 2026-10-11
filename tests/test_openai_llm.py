@@ -19,7 +19,7 @@ sys.path.insert(0, str(project_root / "src"))
 
 from zipclaw.error.custom_errors import ModelRequestError, ModelResponseError
 from zipclaw.llm import openai_llm
-from zipclaw.llm.types import LLMResponse
+from zipclaw.llm.llm_types import LLMResponse
 
 
 class TestOpenAILLM(unittest.IsolatedAsyncioTestCase):
