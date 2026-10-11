@@ -349,6 +349,8 @@ class AgentLoop:
             # 同一类片段连续到达时，不重复打印标题。
             last_output_type = None
 
+            # 暂存正文开始前收到的空格、换行等内容。
+            pending_text = ""
 
             try:
                 async for event in self.llm.stream(
@@ -381,21 +383,38 @@ class AgentLoop:
 
                     elif event.type == "text_delta":
                         if event.text:
-                            # 第一段正文到达时，显示回答前缀。
                             if last_output_type != "text":
+                                # 正文还没开始显示，先收集片段。
+                                pending_text += event.text
+
+                                # strip() 只用于检查是否存在非空白字符。
+                                # 不把处理后的字符串赋回去，因此原文不会改变。
+                                if pending_text.strip():
+                                    print(
+                                        "\nZipClaw > ",
+                                        end="",
+                                        flush=True,
+                                    )
+
+                                    # 将暂存的原始内容一起显示。
+                                    # 开头的空格和换行也会保留。
+                                    print(
+                                        pending_text,
+                                        end="",
+                                        flush=True,
+                                    )
+
+                                    pending_text = ""
+                                    last_output_type = "text"
+
+                            else:
+                                # 正文已经开始显示。
+                                # 后续所有片段都原样输出，保留空格和代码缩进。
                                 print(
-                                    "\nZipClaw > ",
+                                    event.text,
                                     end="",
                                     flush=True,
                                 )
-
-                            print(
-                                event.text,
-                                end="",
-                                flush=True,
-                            )
-
-                            last_output_type = "text"
 
                     elif event.type == "response_completed":
                         # 完整正文、推理文本、工具调用都在这里。
