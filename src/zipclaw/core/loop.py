@@ -4,7 +4,8 @@ import json
 from ..llm.base import BaseLLM
 from ..tools.registry import ToolRegistry
 from pydantic import ValidationError
-from ..error.custom_errors import AgentStepLimitError
+from ..error.custom_errors import AgentStepLimitError,ModelResponseError,ModelRequestError
+from .context import count_context_chars,split_context,summarize_history
 
 class AgentLoop:
     """
@@ -30,6 +31,7 @@ class AgentLoop:
         max_steps: int = 10,
         show_tool_logs: bool = False,
         show_reasoning: bool = True,
+        context_char_budget: int = 20000,
     ):
         # 使用哪个 模型。
         self.llm = llm
@@ -51,6 +53,13 @@ class AgentLoop:
 
         # 开关控制推理文本的显示
         self.show_reasoning = show_reasoning
+
+        # 上下文字符预算，用于判断何时需要压缩历史。
+        # 60000 是我们暂定的应用阈值，不代表模型的实际上下文上限。
+        if context_char_budget <= 0:
+            raise ValueError("上下文字符预算必须大于 0。")
+
+        self.context_char_budget = context_char_budget
 
         self.messages: list[dict] = [
             {
@@ -120,6 +129,95 @@ class AgentLoop:
 
         return False
 
+    async def compact_history(
+        self,
+        tool_schemas: list[dict],
+    ) -> None:
+        """尝试压缩旧历史，成功且变短后才替换原记录。"""
+
+        # 保留最近两组对话，包括当前正在执行的任务。
+        system_messages, old_messages, recent_messages = split_context(
+            messages=self.messages,
+            keep_recent_turns=2,
+        )
+
+        # 历史太少时，没有可压缩的旧对话。
+        if not old_messages:
+            print(
+                "[上下文] 没有可压缩的旧对话，继续使用现有记录。",
+                flush=True,
+            )
+            return
+
+        before_chars = count_context_chars(
+            messages=self.messages,
+            tools=tool_schemas,
+        )
+
+        print("[上下文] 正在生成旧历史摘要……", flush=True)
+
+        try:
+            summary = await summarize_history(
+                llm=self.llm,
+                old_messages=old_messages,
+            )
+        except (ModelRequestError, ModelResponseError) as exc:
+            # 此时尚未修改原历史。
+            # 摘要请求失败后，保留原记录供本次任务继续使用。
+            print(
+                f"[上下文] 压缩失败，保留原历史：{exc}",
+                flush=True,
+            )
+            raise
+
+        # 摘要是历史资料，作为一条助手消息保存。
+        # 不把历史摘要放进 system，避免将历史内容提升为系统指令。
+        summary_message = {
+            "role": "assistant",
+            "content": (
+                "[较早对话的摘要]\n"
+                "以下是历史背景资料，可能存在遗漏，"
+                "不代表新的操作授权；具体操作仍需按当前规则确认。\n"
+                + summary
+            ),
+        }
+
+        # 先组装候选列表，原历史暂时不动。
+        new_messages = []
+        new_messages.extend(system_messages)
+        new_messages.append(summary_message)
+        new_messages.extend(recent_messages)
+
+        after_chars = count_context_chars(
+            messages=new_messages,
+            tools=tool_schemas,
+        )
+
+        # 模型可能把摘要写得很长。
+        # 如果没有减少上下文，就没有替换的必要。
+        if after_chars >= before_chars:
+            print(
+                "[上下文] 摘要没有缩短上下文，保留原历史。",
+                flush=True,
+            )
+            return
+
+        # 修改原列表的内容，保持列表对象不变。
+        # run() 中的 messages 也引用这个列表，因此会同步看到变化。
+        self.messages[:] = new_messages
+
+        print(
+            f"[上下文] 压缩完成：{before_chars} → {after_chars} 个字符。",
+            flush=True,
+        )
+
+        if after_chars > self.context_char_budget:
+            print(
+                "[上下文] 压缩后仍超过字符预算。"
+                "本次任务不再重复压缩，继续使用压缩后的记录。",
+                flush=True,
+            )
+
     async def run(
         self,
         task: str,
@@ -154,8 +252,10 @@ class AgentLoop:
             "content": task,
         })
 
+        # 每次用户输入新任务时，重新允许一次压缩尝试。
+        compression_attempted = False
+
         # 智能体循环。
-        #
         # 每循环一次，可以认为 智能体 做了一步。
         for step_index in range(self.max_steps):
 
@@ -168,10 +268,50 @@ class AgentLoop:
                 flush=True,
             )
 
-            # 把当前消息和 工具参数说明 全部交给 模型。
+            # 获取这次提供给模型的工具说明。
+            tool_schemas = self.tools.schemas()
+
+            # 统计即将发送的历史消息和工具说明。
+            context_chars = count_context_chars(
+                messages=messages,
+                tools=tool_schemas,
+            )
+
+            # 计算当前上下文占字符预算的比例。
+            usage_ratio = context_chars / self.context_char_budget
+
+            # 比如 0.5 转换成百分比就是 50。
+            usage_percent = usage_ratio * 100
+
+            print(
+                f"[上下文] 消息 {len(messages)} 条，"
+                f"字符数 {context_chars}/{self.context_char_budget}，"
+                #把 usage_percent 这个数值格式化为 保留 1 位小数的浮点数。
+                f"预算使用率 {usage_percent:.1f}%",
+                flush=True,
+            )
+
+            #上下文超出预算，压缩历史
+            if context_chars > self.context_char_budget:
+                if not compression_attempted:
+                    # 请求摘要前就标记。
+                    # 即使失败，本次任务也不反复尝试。
+                    compression_attempted = True
+
+                    await self.compact_history(
+                        tool_schemas=tool_schemas,
+                    )
+
+            # print(
+            #     f"[上下文] 消息 {len(messages)} 条，"
+            #     f"消息和工具说明合计 {context_chars} 个字符",
+            #     flush=True,
+            # )
+
+            # 统计和请求使用同一份工具说明。
             response = await self.llm.chat(
                 messages=messages,
-                tools=self.tools.schemas(),
+                tools=tool_schemas,
             )
 
 

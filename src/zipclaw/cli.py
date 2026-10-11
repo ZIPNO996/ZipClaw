@@ -52,9 +52,9 @@ async def main():
 
     # 创建 模型。
     llm = OpenAILLM(
-        api_key=os.environ["OPENAI_API_KEY"],
-        model=os.environ["OPENAI_MODEL"],
-        base_url=os.getenv("OPENAI_BASE_URL"),
+        api_key=os.environ["USTC_API_KEY"],
+        model=os.environ["USTC_MODEL"],
+        base_url=os.getenv("USTC_BASE_URL"),
     )
 
     # 创建 智能体 工具箱。
