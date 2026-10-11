@@ -82,7 +82,8 @@ class EditFileTool(BaseTool):
             return f"无需修改：{args.path}"
 
         # 学习版仍使用直接写入：w 会先截断原文件，失败时不会自动撤销。
-        # 后续再增加临时文件替换、差异展示和用户确认，不在此次修改中扩展。
+        # AgentLoop 已在调用工具前询问用户；这个工具内部不重复询问。
+        # 临时文件替换、专门的差异展示和并发修改检查仍待实现。
         # newline="" 不自动转换换行；with 离开代码块后会关闭文件。
         with target.open("w", encoding="utf-8", newline="") as file:
             file.write(updated)

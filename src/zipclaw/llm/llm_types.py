@@ -23,7 +23,7 @@ class ToolCall(BaseModel):
     # 工具名称，例如：
     # read_file
     # grep
-    # bash
+    # run_command
     name: str
 
     # 调用工具时传入的参数。
@@ -39,8 +39,9 @@ class LLMResponse(BaseModel):
     """
     ZipClaw 内部统一的模型返回格式。
 
-    无论底层使用 OpenAI、DeepSeek 还是 Claude，
-    最终都转换成这个结构。
+    当前兼容接口适配器将回复转换成这个结构。
+    以后增加其它服务适配器时，也应返回这个结构，
+    但定义统一结构本身不代表已经实现了所有模型服务的适配。
     """
 
     # 如果模型直接回答用户，这里会有文本。
@@ -54,8 +55,8 @@ class LLMResponse(BaseModel):
 
     # 模型要求执行的工具。
     #
-    # 使用 default_factory，
-    # 避免把 [] 作为共享默认值。
+    # 使用 default_factory，让每次创建 LLMResponse 时明确生成独立列表。
+    # Pydantic 也会复制不可哈希的默认值；这里用工厂表达意图更清楚。
     tool_calls: list[ToolCall] = Field(default_factory=list)
 
 

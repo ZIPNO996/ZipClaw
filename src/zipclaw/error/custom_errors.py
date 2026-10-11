@@ -16,7 +16,8 @@ class ModelRequestError(RuntimeError):
         super().__init__(message)
 
         # True 表示调用方可以进行有限重试。
-        # 默认 False，避免所有错误都被自动重试。
+        # 默认 False，不建议调用方重试；标记本身不会自动发送请求。
+        # 当前只有摘要请求使用这个标记决定是否重试。
         self.retryable = retryable
 
 

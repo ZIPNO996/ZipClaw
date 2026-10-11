@@ -107,8 +107,9 @@ class RunCommandTool(BaseTool):
                 # subprocess.run(["ls", "-la"])
                 # 第一项 "ls" 是程序
                 # 后面 "-la" 是参数
-                # 推荐这种写法，明确、安全
-                # shell = True 字符串才会交给系统 Shell 解析
+                # 这种写法将程序与参数分开，避免自动解析 Shell 语法。
+                # 它不限制程序访问文件或执行其它操作，不是系统级沙箱。
+                # shell=True 会通过系统命令解释器执行，具体行为与平台有关。
                 shell=False,
 
                 # 非零退出码也正常返回，方便模型查看错误并修复。
@@ -124,8 +125,8 @@ class RunCommandTool(BaseTool):
                 "以及工作区目录是否有效。"
             )
 
-            # stdout：正常输出；stderr：错误输出。
-            # 没有输出时给一个明确的提示。
+        # stdout：标准输出；stderr：标准错误输出，也可能包含警告或进度。
+        # 没有输出时给一个明确的提示；是否成功还需要结合退出码判断。
         stdout = result.stdout
         stderr = result.stderr
 

@@ -31,7 +31,8 @@ class OpenAILLM(BaseLLM):
             api_key=api_key,
             base_url=base_url,
 
-            # 本阶段不自动重试。
+            # 关闭 SDK 自带的自动重试，避免与摘要请求的有限重试叠加。
+            # 普通任务的流式请求当前没有自动重试逻辑。
             max_retries=0,
 
             # 设置网络请求超时，单位为秒。
@@ -45,7 +46,8 @@ class OpenAILLM(BaseLLM):
         tools: list[dict] | None = None,
     ) -> LLMResponse:
 
-        # 请求 模型。
+        # 普通非流式请求；当前上下文摘要使用这个入口。
+        # 这里没有显式传入 thinking 参数，思考模式由服务端默认设置决定。
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
@@ -112,7 +114,8 @@ class OpenAILLM(BaseLLM):
                     "请检查服务配置。"
                 )
 
-            # 第一版允许对这些可能是临时故障的状态进行有限重试。
+            # 标记可能适合有限重试的状态；这里只分类，不直接重试。
+            # 429 也可能是额度不足，因此标记可重试不保证重试会成功。
             retryable_status_codes = {
                 408,  # 请求超时。
                 429,  # 请求受限。
@@ -263,6 +266,8 @@ class OpenAILLM(BaseLLM):
 
         try:
             # stream=True 表示要求服务端分批返回结果。
+            # thinking 是 DeepSeek 风格的扩展参数，需要当前服务支持或转发。
+            # 这里只显式开启思考模式，没有设置 reasoning_effort 思考强度。
             response_stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
@@ -275,7 +280,8 @@ class OpenAILLM(BaseLLM):
                 },
             )
 
-            # 离开这个代码块时关闭连接，包括发生异常的情况。
+            # 流正常耗尽或在此代码块中抛出异常时关闭连接。
+            # 调用方提前停止迭代时，也应及时关闭这个异步生成器。
             async with response_stream:
                 async for chunk in response_stream:
 

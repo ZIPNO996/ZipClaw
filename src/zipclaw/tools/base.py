@@ -10,12 +10,12 @@ class BaseTool(ABC):
     """
     所有智能体工具的基类。
 
-    例如未来会有：
+    例如已经实现或以后可以添加的工具：
 
     ReadFileTool
     WriteFileTool
     GrepTool
-    BashTool
+    RunCommandTool
     GitDiffTool
     """
 

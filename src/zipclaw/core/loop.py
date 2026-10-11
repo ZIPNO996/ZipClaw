@@ -43,8 +43,8 @@ class AgentLoop:
 
         # 最大循环次数。
         #
-        # 防止模型进入死循环，
-        # 一直调用工具停不下来。
+        # 限制当前任务中模型—工具循环的轮数，避免一直调用工具停不下来。
+        # 生成历史摘要的请求和它的有限重试，不计入这个轮数。
         self.max_steps = max_steps
 
         # 控制工具日志是否显示。
@@ -53,7 +53,8 @@ class AgentLoop:
         # 操作前的确认提示单独显示，不受这个开关影响。
         self.show_tool_logs = show_tool_logs
 
-        # 开关控制推理文本的显示
+        # 只控制服务端已返回的推理文本是否显示。
+        # 开启显示不等于开启模型的思考模式，也不改变推理强度。
         self.show_reasoning = show_reasoning
 
         # 上下文字符预算，用于判断何时需要压缩历史。
@@ -138,7 +139,7 @@ class AgentLoop:
         self,
         tool_schemas: list[dict],
     ) -> None:
-        """尝试压缩旧历史，成功且变短后才替换原记录。"""
+        """尝试压缩旧历史，摘要有效、上下文变短且归档成功后才替换原记录。"""
 
         if self.session_store is None:
             print(
@@ -147,7 +148,8 @@ class AgentLoop:
             )
             return
 
-        # 保留最近两组对话，包括当前正在执行的任务。
+        # 保留最近两组用户任务，包括当前正在执行的任务。
+        # 一组可能包含多条助手消息、工具调用和结果，不是只保留两条消息。
         system_messages, old_messages, recent_messages = split_context(
             messages=self.messages,
             keep_recent_turns=2,
@@ -284,7 +286,8 @@ class AgentLoop:
             "content": task,
         })
 
-        # 每次用户输入新任务时，重新允许一次压缩尝试。
+        # 每次用户输入新任务时，重新允许一次压缩流程。
+        # 单次流程中的摘要请求仍可以按 context.py 的规则最多尝试三次。
         compression_attempted = False
 
         # 智能体循环。
@@ -327,7 +330,7 @@ class AgentLoop:
             if context_chars > self.context_char_budget:
                 if not compression_attempted:
                     # 请求摘要前就标记。
-                    # 即使失败，本次任务也不反复尝试。
+                    # 本次任务不反复进入压缩流程；摘要请求的有限重试在内部处理。
                     compression_attempted = True
 
                     await self.compact_history(
@@ -384,7 +387,8 @@ class AgentLoop:
                     elif event.type == "text_delta":
                         if event.text:
                             if last_output_type != "text":
-                                # 正文还没开始显示，先收集片段。
+                                # 当前显示区域不是正文，先暂存正文片段。
+                                # 只有空白时不显示标题；后续收到文字再连同空白一起显示。
                                 pending_text += event.text
 
                                 # strip() 只用于检查是否存在非空白字符。
@@ -593,15 +597,16 @@ class AgentLoop:
 
 
 
-                # 无论成功还是失败，都给本次调用一个结果。
+                # 成功、用户拒绝，或上面已处理的工具错误，都给本次调用一个结果。
+                # 未捕获的异常和任务中断不保证能够执行到这里。
                 messages.append({
                     "role": "tool",
                     "tool_call_id": call.id,
                     "content": content,
                 })
 
-        # 如果循环次数超过限制，
-        # 很可能 智能体 出现死循环。
+        # 已经用完执行轮数，但最后一轮仍要求调用工具，需要下一轮才能继续回答。
+        # 这不一定是死循环；复杂任务也可能需要更多轮数。
         raise AgentStepLimitError(
             f"已达到 {self.max_steps} 轮执行上限，当前任务已停止，"
             "完成情况需要进一步确认。"

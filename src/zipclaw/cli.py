@@ -29,13 +29,14 @@ async def main():
     #
     # 以后可以允许用户：
     #
-    # codeclaw ./my-project
+    # zipclaw ./my-project（目前还没有实现这个参数入口）
     workspace = Path.cwd().resolve()
     print(f"工作区:{workspace}")
 
     # 将工作区路径转换成稳定的标识。
     # 不同项目即使文件夹名称相同，只要完整路径不同，也会分开保存。
-    # 对字节串做 SHA-256 哈希，返回一个 64 位十六进制字符串,同一个路径，每次运行都得到同样的 ID。
+    # 对规范化路径的字节串做 SHA-256 哈希，返回长度为 64 的十六进制字符串。
+    # 同一个规范化路径，每次运行都得到同样的 ID。
     # 路径不同，ID 几乎不可能相同（SHA-256 碰撞概率极低）
     workspace_text = os.path.normcase(str(workspace))
     workspace_bytes = workspace_text.encode("utf-8")
@@ -50,7 +51,8 @@ async def main():
 
     print(f"会话文件:{session_file}")
 
-    # 创建 模型。
+    # 创建模型适配器；当前变量名是 USTC_*，实际服务由配置值决定。
+    # 普通摘要请求使用 chat()，用户任务通过 stream() 接收流式响应。
     llm = OpenAILLM(
         api_key=os.environ["USTC_API_KEY"],
         model=os.environ["USTC_MODEL"],
@@ -181,7 +183,8 @@ async def main():
             # exc 中保存着适配器传出来的中文说明。
             print(f"\n[模型请求失败] {exc}")
 
-            # 只是提示用户，不会自动重新发送请求。
+            # CLI 不再重发请求；如果错误来自摘要请求，有限重试已经在 context.py 完成。
+            # 普通任务的流式请求不会因为 retryable=True 就自动重试。
             print("本次任务已停止，程序没有退出。")
             print("你可以继续输入，或输入 /clear 清空对话。")
 
@@ -201,7 +204,8 @@ async def main():
         #     # 避免达到上限后，使用一个不存在的 result。
         #     print(f"\nZipClaw > {result}")
 
-        # 正常完成、达到步数上限，两种情况都保存历史。
+        # 正常完成，或遇到上面已处理的三类任务异常后，都尝试保存当前历史。
+        # 历史可能含有旧对话摘要；压缩前的记录另外保存在归档文件中。
         try:
             session_store.save(agent.messages)
         except (OSError, TypeError, ValueError) as exc:

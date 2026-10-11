@@ -5,7 +5,7 @@ from uuid import uuid4
 
 
 class SessionStore:
-    """负责将对话历史保存到文件，以及从文件恢复历史。"""
+    """负责保存、恢复当前会话，并在压缩前保存独立的历史归档。"""
 
     def __init__(self, file_path: Path):
         # file_path 是会话文件的位置，不是工作区的位置。
@@ -13,7 +13,7 @@ class SessionStore:
         self.file_path = file_path
 
     def save(self, messages: list[dict]) -> None:
-        """将完整的对话历史保存为 JSON 文件。"""
+        """将传入的消息列表完整保存为 JSON；压缩后的列表可能已含历史摘要。"""
 
         # 获取会话文件所在的目录。
         directory = self.file_path.parent
@@ -52,6 +52,7 @@ class SessionStore:
 
         # 临时文件完整写入并关闭后，再替换正式文件。
         # 写临时文件失败时，不会执行到这里，原会话文件仍保留。
+        # 这不是多进程写入锁，也没有实现断电时的持久化保证。
         temporary_path.replace(self.file_path)
 
     def load(self) -> list[dict]:
@@ -117,7 +118,7 @@ class SessionStore:
             self.file_path.parent
             / "archives"
             #self.file_path.stem 得到的是不带最后一个扩展名的文件名，类型是字符串。
-            #哈希标识是唯一的，因为cli加载的SessionStore对象是确定的
+            # 使用 CLI 为当前工作区计算的标识，不需要从多个归档目录里猜选。
             / self.file_path.stem
         )
 

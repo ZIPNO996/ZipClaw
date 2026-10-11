@@ -56,7 +56,7 @@ class ToolRegistry:
         假设注册了：
 
         read_file
-        bash
+        run_command
 
         那么这里就会返回这两个工具对应的 JSON 参数结构。
         """

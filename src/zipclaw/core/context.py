@@ -7,8 +7,9 @@ def count_context_chars(
     messages: list[dict],
     tools: list[dict],
 ) -> int:
-    """统计消息历史和工具说明序列化后的字符总数。"""
+    """统计消息历史和工具说明的 JSON 字符数，不是实际 token 数或网络字节数。"""
 
+    # 这里只统计 messages 和 tools，不包含 model、stream 等其它请求参数。
     # 发给模型的不只是聊天内容，还有工具名称、描述和参数结构。
     # 把两部分放在一起，避免遗漏工具说明所占的空间。
     context_data = {
@@ -41,6 +42,7 @@ def split_context(
     一组对话从一条 user 消息开始，
     到下一条 user 消息之前结束。
     最近对话包含当前正在执行的任务。
+    这里只按用户消息划分范围，不检查或修复损坏的工具调用配对。
     """
 
     # 至少保留当前这一组，避免把正在执行的任务压缩掉。
@@ -108,7 +110,7 @@ async def summarize_history(
         message_copy = message.copy()
 
         # 摘要保留实际对话、工具调用和执行结果即可。
-        # 去掉推理文本，减少这次摘要请求的数据量。
+        # 去掉历史推理文本，减少作为资料发送的内容；原始记录和归档仍保留它。
         # 第二个参数 None 表示：字段不存在时也不报错。
         message_copy.pop("reasoning_content", None)
 

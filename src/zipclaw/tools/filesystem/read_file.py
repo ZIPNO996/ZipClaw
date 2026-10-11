@@ -70,7 +70,8 @@ class ReadFileTool(BaseTool):
 
         /Users/zhang/code/demo
 
-        Agent 原则上只能访问这个目录里面的文件。
+        本文件工具会检查目标是否在这个目录内。
+        这不是整个 Agent 的系统级沙箱，run_command 启动的程序仍可能访问其它目录。
         """
 
         # resolve() 会转换为绝对路径，
@@ -144,7 +145,7 @@ class ReadFileTool(BaseTool):
         # 保存准备返回的文件内容。
         selected_lines: list[str] = []
 
-        # 已经收集的文件内容字符数。
+        # 已经收集的完整行字符数，包括行内原始换行符，不包括附加提示。
         total_chars = 0
 
         # 工具附加的说明，不属于文件原文。
@@ -156,6 +157,8 @@ class ReadFileTool(BaseTool):
                 errors="replace",
                 newline="",
         ) as file:
+            # 逐行读取仍会先读取完整的一行。
+            # max_chars 限制的是返回的正文字符数，不是超长单行的读取内存。
             for line_number, line in enumerate(file, start=1):
 
                 # 跳过起始行之前的内容。
@@ -193,7 +196,7 @@ class ReadFileTool(BaseTool):
                         partial_line = line[:args.max_chars]
                         selected_lines.append(partial_line)
 
-                        # 这一行还没有读完整，不能让模型直接跳到下一行。
+                        # 这一行已从文件读入，但只返回了一部分，不能让模型直接跳到下一行。
                         notice = (
                             f"第 {line_number} 行超过字符上限，"
                             f"本次仅展示该行的前 {args.max_chars} 个字符。"
@@ -209,7 +212,8 @@ class ReadFileTool(BaseTool):
                 selected_lines.append(line)
                 total_chars = new_total_chars
 
-        # 保留之前的起始行越界判断。
+        # 起始行大于 1 且没有选中任何内容，表示起始行超出了文件范围。
+        # 空文件按默认 offset=1 读取时，仍返回空字符串，不专门提示“文件为空”。
         if not selected_lines and args.offset > 1:
             return f"起始行 {args.offset} 超过文件范围。"
 
