@@ -1,6 +1,7 @@
 import json
+import asyncio
 from ..llm.base import BaseLLM
-from ..error.custom_errors import ModelResponseError
+from ..error.custom_errors import ModelRequestError,ModelResponseError
 
 def count_context_chars(
     messages: list[dict],
@@ -145,11 +146,49 @@ async def summarize_history(
         },
     ]
 
-    # 本次只需要生成文字摘要，不提供工具。
-    response = await llm.chat(
-        messages=summary_messages,
-        tools=None,
-    )
+    # 包含第一次请求，总共最多尝试 3 次。
+    # 因此，实际最多重试 2 次。
+    max_attempts = 3
+
+    for attempt in range(1, max_attempts + 1):
+        print(
+            f"[上下文] 摘要请求，第 {attempt}/{max_attempts} 次尝试。",
+            flush=True,
+        )
+
+        try:
+            response = await llm.chat(
+                messages=summary_messages,
+                tools=None,
+            )
+
+        except ModelRequestError as exc:
+            # 认证失败、参数错误等，不适合重复请求。
+            if not exc.retryable:
+                raise
+
+            # 已经用完尝试次数，将最后一次错误继续向外抛出。
+            # 外层会停止本次任务，并保留原历史和聊天入口。
+            if attempt >= max_attempts:
+                raise
+
+            # 第一次失败等待 2 秒，第二次失败等待 4 秒。
+            wait_seconds = attempt * 2
+
+            print(
+                f"[上下文] 摘要请求失败：{exc}"
+                f" 将在 {wait_seconds} 秒后重试。",
+                flush=True,
+            )
+
+            # 异步函数中使用 asyncio.sleep，
+            # 等待期间允许事件循环处理其它工作。
+            await asyncio.sleep(wait_seconds)
+
+        else:
+            # 请求成功，结束重试循环。
+            # 接着执行下面已有的摘要内容检查。
+            break
 
     # 即使模型意外返回工具调用，也不执行它。
     if response.has_tool_calls:

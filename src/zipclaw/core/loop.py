@@ -163,7 +163,8 @@ class AgentLoop:
             )
         except (ModelRequestError, ModelResponseError) as exc:
             # 此时尚未修改原历史。
-            # 摘要请求失败后，保留原记录供本次任务继续使用。
+            # 摘要最终失败后，保留原记录。
+            # 将异常向外抛出，由 CLI 停止当前任务并保留聊天入口。
             print(
                 f"[上下文] 压缩失败，保留原历史：{exc}",
                 flush=True,

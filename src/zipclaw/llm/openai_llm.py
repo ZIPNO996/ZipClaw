@@ -52,15 +52,15 @@ class OpenAILLM(BaseLLM):
             )
 
         except openai.APITimeoutError as exc:
-            # 超时异常也是连接异常的一种。
-            # 因此必须先捕获它，才能给出单独的超时提示。
             raise ModelRequestError(
-                "模型请求超时。请检查网络，或稍后手动重试。"
+                "模型请求超时。",
+                retryable=True,
             ) from exc
 
         except openai.APIConnectionError as exc:
             raise ModelRequestError(
-                "无法连接模型服务。请检查网络、代理和服务地址。"
+                "无法连接模型服务。请检查网络、代理和服务地址。",
+                retryable=True,
             ) from exc
 
         except openai.APIStatusError as exc:
@@ -110,9 +110,22 @@ class OpenAILLM(BaseLLM):
                     "请检查服务配置。"
                 )
 
-            # 不直接把服务端返回的完整错误内容打印给用户。
-            # 自定义异常携带中文提示，原始异常保留为排查线索。
-            raise ModelRequestError(message) from exc
+            # 第一版允许对这些可能是临时故障的状态进行有限重试。
+            retryable_status_codes = {
+                408,  # 请求超时。
+                429,  # 请求受限。
+                500,  # 服务内部错误。
+                502,  # 网关错误。
+                503,  # 服务暂时不可用。
+                504,  # 网关超时。
+            }
+
+            retryable = status_code in retryable_status_codes
+
+            raise ModelRequestError(
+                message,
+                retryable=retryable,
+            ) from exc
 
         # 第一版只处理响应中的第一个候选回答（choice）。
         # 没有候选回复时，不能直接访问 choices[0]。
