@@ -35,6 +35,7 @@ class AgentLoop:
         show_reasoning: bool = True,
         context_char_budget: int = 60000,
         session_store: SessionStore | None = None,
+        keep_recent_turns: int = 2,
     ):
         # 使用哪个 模型。
         self.llm = llm
@@ -67,6 +68,9 @@ class AgentLoop:
 
         # 压缩历史之前，通过它保存原始记录的归档。
         self.session_store = session_store
+
+        #压缩时选择保留的近期轮次
+        self.keep_recent_turns = keep_recent_turns
 
         self.messages: list[dict] = [
             {
@@ -218,11 +222,12 @@ class AgentLoop:
             )
             return
 
-        # 保留最近两组用户任务，包括当前正在执行的任务。
+        # 按 keep_recent_turns 保留最近几组用户任务，
+        # 其中包含当前正在执行的任务。
         # 一组可能包含多条助手消息、工具调用和结果，不是只保留两条消息。
         system_messages, old_messages, recent_messages = split_context(
             messages=self.messages,
-            keep_recent_turns=2,
+            keep_recent_turns=self.keep_recent_turns,
         )
 
         # 历史太少时，没有可压缩的旧对话。

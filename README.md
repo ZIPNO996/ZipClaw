@@ -92,6 +92,11 @@ zipclaw = "zipclaw.cli:entrypoint"
 USTC_API_KEY=your_api_key_here
 USTC_BASE_URL=https://your-provider.example/v1
 USTC_MODEL=your_tool_capable_model_id
+
+ZIPCLAW_SHOW_TOOL_LOGS=false
+ZIPCLAW_SHOW_REASONING=true
+ZIPCLAW_MAX_STEPS=10
+ZIPCLAW_CONTEXT_CHAR_BUDGET=60000
 ```
 
 | 变量 | 说明 |
@@ -111,6 +116,8 @@ extra_body={"thinking": {"type": "enabled"}}
 因此，当前服务需要支持或转发这个参数；更换模型服务时需检查兼容性。它不是所有 OpenAI 兼容接口的通用参数，也还没有做成配置开关。普通 `chat()` 请求没有传入这个参数，生成摘要时使用服务端的默认思考设置；两种请求都没有显式设置 `reasoning_effort`。
 
 CLI 使用 `load_dotenv()` 加载配置。已有的进程环境变量通常会优先于 `.env`，修改文件后如果配置没有生效，也要检查终端里是否设置了同名变量。
+
+随后由 `config.py` 的 `load_config()` 统一读取和检查配置。布尔值填写 `true` 或 `false`，不区分大小写；轮数和字符预算必须是正整数。缺少必填项或填写错误时，CLI 显示中文配置错误并停止启动。可参考不含真实密钥的 `.env.example`。
 
 `.env` 已被 `.gitignore` 忽略。不要把真实 Key 写进 README、源码或提交记录。
 
@@ -144,7 +151,14 @@ ZipClaw > ……
 
 ### 显示开关与执行参数
 
-这些参数目前在 `AgentLoop.__init__()` 中设置，也可以由 `cli.py` 创建实例时显式传入，还没有对应的聊天命令或命令行选项。
+CLI 从 `.env` 或进程环境变量读取下面四个设置，经 `config.py` 校验后传给 `AgentLoop`。修改配置后重新启动生效，目前没有对应的聊天命令或命令行选项。直接在 Python 中创建 `AgentLoop` 时，仍可以显式传入这些参数。
+
+| 环境变量 | 对应参数 |
+| --- | --- |
+| `ZIPCLAW_SHOW_TOOL_LOGS` | `show_tool_logs` |
+| `ZIPCLAW_SHOW_REASONING` | `show_reasoning` |
+| `ZIPCLAW_MAX_STEPS` | `max_steps` |
+| `ZIPCLAW_CONTEXT_CHAR_BUDGET` | `context_char_budget` |
 
 | 参数 | 当前默认值 | 作用 |
 | --- | --- | --- |
@@ -313,6 +327,7 @@ ZipClaw/
     └── zipclaw/
         ├── __init__.py
         ├── cli.py              # 配置加载、工具注册、终端输入输出
+        ├── config.py           # 环境变量读取、类型转换和配置检查
         ├── core/
         │   ├── __init__.py
         │   ├── loop.py         # 对话历史和模型—工具执行循环

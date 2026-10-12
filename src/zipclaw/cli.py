@@ -7,6 +7,7 @@ import signal
 from pathlib import Path
 from dotenv import load_dotenv
 
+from .config import load_config
 from .core.loop import AgentLoop
 from .llm.openai_llm import OpenAILLM
 from .tools.filesystem.list_dir import ListDirTool
@@ -23,6 +24,15 @@ from .core.session import SessionStore
 async def main():
     # 从 .env 加载环境变量。
     load_dotenv()
+
+    # 将字符串配置转换成布尔值、整数等实际需要的类型。
+    # 配置有误时先停止启动，避免带着错误设置创建模型或加载会话。
+    try:
+        config = load_config()
+    except ValueError as exc:
+        print(f"[配置错误] {exc}")
+        print("请检查 .env 或终端环境变量，修改后重新启动 ZipClaw。")
+        return
 
     # 当前终端所在目录，
     # 就作为 智能体 工作区。
@@ -54,9 +64,10 @@ async def main():
     # 创建模型适配器；当前变量名是 USTC_*，实际服务由配置值决定。
     # 普通摘要请求使用 chat()，用户任务通过 stream() 接收流式响应。
     llm = OpenAILLM(
-        api_key=os.environ["USTC_API_KEY"],
-        model=os.environ["USTC_MODEL"],
-        base_url=os.getenv("USTC_BASE_URL"),
+        api_key=config.api_key,
+        model=config.model,
+        base_url=config.base_url,
+        thinking_mode=config.thinking_mode,
     )
 
     # 创建 智能体 工具箱。
@@ -99,7 +110,12 @@ async def main():
     agent = AgentLoop(
         llm=llm,
         tools=registry,
+        show_tool_logs=config.show_tool_logs,
+        show_reasoning=config.show_reasoning,
+        max_steps=config.max_steps,
+        context_char_budget=config.context_char_budget,
         session_store=session_store,
+        keep_recent_turns=config.keep_recent_turns,
     )
 
     try:

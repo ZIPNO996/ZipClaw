@@ -23,6 +23,7 @@ class OpenAILLM(BaseLLM):
         api_key: str,
         model: str,
         base_url: str | None = None,
+        thinking_mode: str = "default",
     ):
         self.model = model
 
@@ -40,6 +41,28 @@ class OpenAILLM(BaseLLM):
             timeout=120.0,
         )
 
+        self.thinking_mode = thinking_mode
+
+    def build_extra_body(self) -> dict:
+        """根据配置，生成服务端扩展参数。"""
+
+        # 空字典表示不添加任何扩展字段。
+        extra_body = {}
+
+        if self.thinking_mode == "enabled":
+            extra_body["thinking"] = {
+                "type": "enabled",
+            }
+
+        elif self.thinking_mode == "disabled":
+            extra_body["thinking"] = {
+                "type": "disabled",
+            }
+
+        # default 不进入上面的分支，因此返回空字典。
+        # 注意：不传参数不代表关闭思考，而是使用服务端默认行为。
+        return extra_body
+
     async def chat(
         self,
         messages: list[dict],
@@ -47,12 +70,13 @@ class OpenAILLM(BaseLLM):
     ) -> LLMResponse:
 
         # 普通非流式请求；当前上下文摘要使用这个入口。
-        # 这里没有显式传入 thinking 参数，思考模式由服务端默认设置决定。
+        # 是否传入 thinking 参数，由启动配置决定。
         try:
             response = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=tools,
+                extra_body=self.build_extra_body(),
             )
 
         except openai.APITimeoutError as exc:
@@ -267,17 +291,14 @@ class OpenAILLM(BaseLLM):
         try:
             # stream=True 表示要求服务端分批返回结果。
             # thinking 是 DeepSeek 风格的扩展参数，需要当前服务支持或转发。
-            # 这里只显式开启思考模式，没有设置 reasoning_effort 思考强度。
+            # 根据配置使用默认行为、开启或关闭思考。
+            # 当前没有设置 reasoning_effort 思考强度。
             response_stream = await self.client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 tools=tools,
                 stream=True,
-                extra_body={
-                    "thinking": {
-                        "type": "enabled",
-                    },
-                },
+                extra_body=self.build_extra_body(),
             )
 
             # 流正常耗尽或在此代码块中抛出异常时关闭连接。
