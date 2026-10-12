@@ -1,6 +1,7 @@
 # src/zipclaw/core/loop.py
 
 import json
+import difflib
 from ..llm.base import BaseLLM
 from ..tools.registry import ToolRegistry
 from pydantic import ValidationError
@@ -84,6 +85,65 @@ class AgentLoop:
             }
         ]
 
+    def build_edit_preview(self, arguments: dict) -> str | None:
+        """根据编辑参数生成差异文本，只做展示，不读取或修改文件。"""
+
+        old_text = arguments.get("old_text")
+        new_text = arguments.get("new_text")
+
+        # 参数不完整时，不在展示阶段猜测内容。
+        # 确认提示仍显示完整参数，正式执行时由 Pydantic 和工具检查。
+        if not isinstance(old_text, str) or not isinstance(new_text, str):
+            return None
+
+        if not old_text:
+            return None
+
+        if old_text == new_text:
+            return "旧文本与新文本相同，没有文本差异。"
+
+        # 保留换行符，才能识别仅修改 LF / CRLF 的情况。
+        # 这里比较的是调用参数中的两个片段，不是整份文件。
+        old_lines = old_text.splitlines(keepends=True)
+        new_lines = new_text.splitlines(keepends=True)
+
+        # unified_diff() 逐行提供差异：
+        # - 开头的是删除行，+ 开头的是新增行，空格开头的是上下文。
+        # n=3 表示每处改动附近最多显示三行未改变的内容。
+        diff_lines = difflib.unified_diff(
+            old_lines,
+            new_lines,
+            fromfile="修改前的片段",
+            tofile="修改后的片段",
+            n=3,
+            lineterm="",
+        )
+
+        preview_lines = []
+
+        for index, line in enumerate(diff_lines):
+            # 前两行是片段名称，@@ 开头的是片段内的行号范围。
+            # 它们是 difflib 生成的说明，不是待编辑内容。
+            if index < 2 or line.startswith("@@"):
+                preview_lines.append(line)
+                continue
+
+            # 去掉显示行末的换行，再统一用 \n 拼接预览。
+            # 同时标明原本的行尾，避免换行差异在终端里看不出来。
+            # 不使用 strip()，因为代码的缩进和尾部空格也属于内容。
+            if line.endswith("\r\n"):
+                display_line = line[:-2] + "  [行尾：CRLF]"
+            elif line.endswith("\n"):
+                display_line = line[:-1] + "  [行尾：LF]"
+            elif line.endswith("\r"):
+                display_line = line[:-1] + "  [行尾：CR]"
+            else:
+                display_line = line + "  [此片段行末无换行符]"
+
+            preview_lines.append(display_line)
+
+        return "\n".join(preview_lines)
+
     def confirm_tool_call(
         self,
         name: str,
@@ -117,6 +177,16 @@ class AgentLoop:
 
         print("本次操作的完整参数：", flush=True)
         print(arguments_text, flush=True)
+
+        if name == "edit_file":
+            preview = self.build_edit_preview(arguments)
+
+            if preview is not None:
+                print("\n[修改差异预览]", flush=True)
+                print("- 表示删除，+ 表示新增；行号是片段内的位置。", flush=True)
+                print("行尾标注仅用于说明，不会写入文件。", flush=True)
+                print(preview, flush=True)
+                print("预览根据参数生成，文件是否唯一匹配将在执行时检查。", flush=True)
 
         try:
             answer = input("允许执行吗？输入 y 同意，直接回车拒绝 [y/N]：")
