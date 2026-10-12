@@ -106,6 +106,16 @@ async def main():
         )
     )
 
+    # 有独立搜索密钥才把工具提供给模型；不配置不影响原有六个工具。
+    if config.tavily_api_key is not None:
+        # 启用时才导入，旧的可编辑命令环境在同步新依赖前仍可使用原有聊天。
+        from .tools.web.web_search import WebSearchTool
+
+        registry.register(WebSearchTool(api_key=config.tavily_api_key))
+        print("网页搜索：已启用（Tavily，调用前需要确认）。")
+    else:
+        print("网页搜索：未启用（未配置 TAVILY_API_KEY）。")
+
     # 创建 智能体。
     agent = AgentLoop(
         llm=llm,

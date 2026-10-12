@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "dotenv>=0.9.9",
+    "httpx>=0.28.1",
     "openai>=3.19.2",
     "pydantic>=2.13.5",
 ]
@@ -23,3 +24,12 @@ where = ["src"]
 
 [project.scripts]
 zipclaw = "zipclaw.cli:entrypoint"
+zipclaw-wechat = "zipclaw.channels.wechat.main:entrypoint"
+
+[project.optional-dependencies]
+wechat = [
+    "httpx>=0.28.1",
+    "qrcode>=8.2",
+    "cryptography>=43.0.0",
+    "pillow>=11.0.0",
+]

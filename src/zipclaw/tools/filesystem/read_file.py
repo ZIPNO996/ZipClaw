@@ -62,7 +62,7 @@ class ReadFileTool(BaseTool):
     #参考base.py对此处的解释
     args_model = ReadFileArgs
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, full_access: bool = False):
         """
         workspace 表示 Agent 当前允许操作的项目目录。
 
@@ -70,13 +70,15 @@ class ReadFileTool(BaseTool):
 
         /Users/zhang/code/demo
 
-        本文件工具会检查目标是否在这个目录内。
+        默认检查目标是否在这个目录内；full_access=True 时允许外部路径。
         这不是整个 Agent 的系统级沙箱，run_command 启动的程序仍可能访问其它目录。
         """
 
         # resolve() 会转换为绝对路径，
         # 同时清理 ../ 等路径。
         self.workspace = workspace.resolve()
+        # 只有入口明确开启完全访问，才放开工作区边界。
+        self.full_access = full_access
 
     async def execute(
         self,
@@ -112,7 +114,7 @@ class ReadFileTool(BaseTool):
             self.workspace / args.path
         ).resolve()
 
-        # 安全检查。
+        # 未开启完全访问时，检查实际目标是否仍在工作区内。
         #
         # 防止模型输入类似：
         #
@@ -120,7 +122,7 @@ class ReadFileTool(BaseTool):
         #
         # 从而访问 workspace 外部的文件。
         #最终要访问的这个文件，到底在不在我的工作目录（workspace）里面
-        if not target.is_relative_to(self.workspace):
+        if not self.full_access and not target.is_relative_to(self.workspace):
             raise ValueError(
                 "不能访问工作区之外的文件。"
             )

@@ -47,14 +47,15 @@ class EditFileTool(BaseTool):
     )
     args_model = EditFileArgs
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, full_access: bool = False):
         self.workspace = workspace.resolve()
+        self.full_access = full_access
 
     async def execute(self, args: EditFileArgs) -> str:
         """先检查路径和匹配，再生成新内容，最后写入磁盘。"""
 
         target = (self.workspace / args.path).resolve()
-        if not target.is_relative_to(self.workspace):
+        if not self.full_access and not target.is_relative_to(self.workspace):
             raise ValueError("不能访问工作区之外的文件。")
 
         if not target.exists():

@@ -58,8 +58,9 @@ class GrepTool(BaseTool):
     MAX_FILE_BYTES = 1024 * 1024  # 1 MiB，避免一次读取很大的文件。
     MAX_LINE_CHARS = 500  # 限制单条结果长度，避免压缩文件的一行占满上下文。
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, full_access: bool = False):
         self.workspace = workspace.resolve()
+        self.full_access = full_access
 
     def _iter_files(self, target: Path) -> Iterator[Path]:
         """逐个提供候选文件；下划线表示这是工具内部使用的辅助方法。"""
@@ -133,13 +134,13 @@ class GrepTool(BaseTool):
 
         requested_path = self.workspace / args.path
         target = requested_path.resolve()
-        if not target.is_relative_to(self.workspace):
+        if not self.full_access and not target.is_relative_to(self.workspace):
             raise ValueError("不能搜索工作区之外的路径。")
         if requested_path.is_symlink():
-            return "不搜索链接路径，请指定工作区内的实际文件或目录。"
+            return "不搜索链接路径，请指定实际文件或目录。"
 
         if requested_path.is_junction():
-            return "不搜索链接路径，请指定工作区内的实际文件或目录。"
+            return "不搜索链接路径，请指定实际文件或目录。"
 
         if not target.exists():
             return f"搜索路径不存在：{args.path}"
@@ -168,7 +169,7 @@ class GrepTool(BaseTool):
 
                 resolved = candidate.resolve()
 
-                if not resolved.is_relative_to(self.workspace):
+                if not self.full_access and not resolved.is_relative_to(self.workspace):
                     skipped += 1
                     continue
 
@@ -206,8 +207,10 @@ class GrepTool(BaseTool):
                 continue
 
             # 第三步：在这个文件中逐行搜索。
-            workspace_relative_path = resolved.relative_to(self.workspace)
-            relative_path = workspace_relative_path.as_posix()
+            if resolved.is_relative_to(self.workspace):
+                relative_path = resolved.relative_to(self.workspace).as_posix()
+            else:
+                relative_path = resolved.as_posix()
 
             # splitlines() 拆分文本行；enumerate(..., start=1) 同时提供行号。
             lines = text.splitlines()

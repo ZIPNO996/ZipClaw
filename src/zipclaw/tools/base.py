@@ -48,15 +48,29 @@ class BaseTool(ABC):
         所以我们不需要自己手写 properties / required。
         """
 
+        parameters = self.args_model.model_json_schema()
+        description = self.description
+        if getattr(self, "full_access", False):
+            # 同时告诉模型实际权限，避免描述仍要求只能操作工作区。
+            description += (
+                "当前为完全访问模式，允许工作区外的路径，"
+                "此规则覆盖上文的工作区范围限制；其它参数约束仍然有效。"
+            )
+            path_schema = parameters.get("properties", {}).get("path")
+            if path_schema is not None:
+                path_schema["description"] = (
+                    "允许绝对路径或工作区相对路径，可访问工作区外的文件或目录。"
+                )
+
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": self.description,
+                "description": description,
 
                 # Pydantic 自动生成 JSON 参数结构。
                 # 这里参数的description也会告知给模型。
-                "parameters": self.args_model.model_json_schema(),
+                "parameters": parameters,
             },
         }
 

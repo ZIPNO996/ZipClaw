@@ -77,6 +77,9 @@ class AppConfig:
     context_char_budget: int
     keep_recent_turns: int
     thinking_mode: str
+    wechat_full_access: bool = False
+    # 搜索使用独立密钥；不配置时不注册 web_search，原有聊天仍然可用。
+    tavily_api_key: str | None = field(default=None, repr=False)
 
 
 def load_config() -> AppConfig:
@@ -136,6 +139,22 @@ def load_config() -> AppConfig:
             "必须填写 default、enabled 或 disabled。"
         )
 
+    # 只影响微信入口：开启后免确认，并放开文件工具的工作区边界。
+    # 默认关闭；终端入口不使用这个配置。
+    wechat_full_access = read_bool_env(
+        "ZIPCLAW_WECHAT_FULL_ACCESS",
+        default=False,
+    )
+
+    # Tavily 与 USTC 是不同服务，不能默认复用模型密钥。
+    # 未设置、留空或只有空白，都表示暂不启用网页搜索。
+    tavily_api_key_value = os.getenv("TAVILY_API_KEY")
+    tavily_api_key = None
+    if tavily_api_key_value is not None:
+        stripped_key = tavily_api_key_value.strip()
+        if stripped_key:
+            tavily_api_key = stripped_key
+
     # 用字段名传入值，方便阅读，也避免混淆参数顺序。
     return AppConfig(
         api_key=api_key,
@@ -147,4 +166,6 @@ def load_config() -> AppConfig:
         context_char_budget=context_char_budget,
         keep_recent_turns=keep_recent_turns,
         thinking_mode=thinking_mode,
+        wechat_full_access=wechat_full_access,
+        tavily_api_key=tavily_api_key,
     )

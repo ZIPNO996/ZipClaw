@@ -62,11 +62,12 @@ class WriteFileTool(BaseTool):
 
     # __init__ 是初始化方法：WriteFileTool(workspace=...) 时自动调用。
     # self 代表当前工具实例，workspace: Path 是参数的类型标注。
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, full_access: bool = False):
         # self.workspace 是实例属性，后面的 execute() 可以继续使用它。
         # resolve() 返回解析后的绝对路径，清理 .、.. 并解析路径中的链接。
         # 它不会替你创建目录；不存在的路径也可能被解析出来。
         self.workspace = workspace.resolve()
+        self.full_access = full_access
 
     # async def 定义异步方法，外部用 await tool.execute(...) 调用。
     # 这里是为了统一 BaseTool 接口；里面的文件操作仍然是同步操作，
@@ -86,7 +87,7 @@ class WriteFileTool(BaseTool):
         # not 表示取反：不在工作区内就拒绝。
         # 必须在 mkdir()、open() 等修改磁盘的操作之前检查边界。
         # 这是一般路径检查，不是能防御所有并发路径替换的系统级沙箱。
-        if not target.is_relative_to(self.workspace):
+        if not self.full_access and not target.is_relative_to(self.workspace):
             # raise 是抛出异常，立即离开当前执行流程，而不是普通返回。
             # AgentLoop 已有的 except ValueError 会把它转成工具错误结果。
             raise ValueError("不能访问工作区之外的文件。")
@@ -143,7 +144,10 @@ class WriteFileTool(BaseTool):
 
         # relative_to() 去掉工作区前缀，得到 src/main.py 这样的相对路径。
         # as_posix() 将显示的路径分隔符统一成 /，方便模型继续使用。
-        relative_path = target.relative_to(self.workspace).as_posix()
+        if target.is_relative_to(self.workspace):
+            relative_path = target.relative_to(self.workspace).as_posix()
+        else:
+            relative_path = target.as_posix()
 
         # 这个返回值会作为 tool 消息发给模型，不一定原样打印到终端。
         # 只说明创建成功，不代表文件内的代码正确，也不代表测试通过。

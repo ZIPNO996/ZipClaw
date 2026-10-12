@@ -36,15 +36,16 @@ class ListDirTool(BaseTool):
     )
     args_model = ListDirArgs
 
-    def __init__(self, workspace: Path):
+    def __init__(self, workspace: Path, full_access: bool = False):
         # 与 read_file 使用同一个工作区，两个工具才能配合使用。
         self.workspace = workspace.resolve()
+        self.full_access = full_access
 
     async def execute(self, args: ListDirArgs) -> str:
         # 例如工作区是 /project，path 是 src，则目标是 /project/src。
         # resolve() 清理 ../ 并解析链接，再按实际路径检查边界。
         target = (self.workspace / args.path).resolve()
-        if not target.is_relative_to(self.workspace):
+        if not self.full_access and not target.is_relative_to(self.workspace):
             raise ValueError("不能访问工作区之外的目录。")
 
         if not target.exists():
@@ -74,8 +75,12 @@ class ListDirTool(BaseTool):
                 kind = "其他"
 
             # 返回 src/main.py，而非仅 main.py，模型可直接拿去调用 read_file。
-            # as_posix() 将显示的路径分隔符统一为 /，不返回工作区绝对路径。
-            relative_path = entry.relative_to(self.workspace).as_posix()
+            # as_posix() 统一分隔符；工作区内用相对路径，外部条目用绝对路径。
+            if entry.is_relative_to(self.workspace):
+                relative_path = entry.relative_to(self.workspace).as_posix()
+            else:
+                # 外部目录返回绝对路径，后续 read_file 才能准确定位。
+                relative_path = entry.as_posix()
             lines.append(f"[{kind}] {relative_path}")
 
         if len(entries) > args.max_entries:
