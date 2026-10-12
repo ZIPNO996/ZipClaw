@@ -3,6 +3,7 @@ from ..base import BaseTool
 from pathlib import Path
 import subprocess
 import asyncio
+import os
 
 class RunCommandArgs(BaseModel):
     """
@@ -56,68 +57,63 @@ class RunCommandTool(BaseTool):
         # 保存命令的工作目录。
         self.workspace = workspace.resolve()
 
-    async def execute(self, args: RunCommandArgs)->str:
-        # 列表虽然不能为空，但第一项仍可能是空字符串。
+    async def stop_process(
+        self,
+        process: asyncio.subprocess.Process,
+        output_task: asyncio.Task,
+    ) -> None:
+        """终止直接启动的程序，并等待输出收集完成。"""
+
+        # returncode 为 None，表示尚未取得进程退出码。
+        if process.returncode is None:
+            try:
+                # 请求操作系统立即终止这个进程。
+                process.kill()
+
+            except ProcessLookupError:
+                # 检查时程序还在运行，
+                # 但调用 kill() 前它可能刚好自己退出了。
+                pass
+
+        # output_task 内部执行 communicate()：
+        # 它会收集输出，并等待程序退出。
+        await output_task
+
+    async def execute(self, args: RunCommandArgs) -> str:
+        # 列表不能为空，程序名称也不能只包含空格。
         program = args.command[0]
 
         if not program.strip():
             return "执行失败：程序名称不能为空。"
 
-        try:
-            # subprocess.run() 负责启动程序，并等待它结束。
-            #
-            # 它会阻塞当前线程，所以使用 asyncio.to_thread()
-            # 把等待过程放到另一个线程中执行。
-            # await 表示当前方法等待执行结果。
-            #asyncio.to_thread() 的设计就是：第一个参数是要调用的函数，后面的参数都转交给这个函数。
-            #相当于让另一个线程执行：
-            # result = subprocess.run(
-            #     args.command,
-            #     cwd=self.workspace,
-            #     capture_output=True,
-            #     timeout=args.timeout,
-            #     ......
-            # )
-            result = await asyncio.to_thread(
-                subprocess.run,
-                args.command,
+        # Windows 下为命令创建新的进程组。
+        # 让 ZipClaw 接收 Ctrl+C，再由取消处理逻辑终止命令。
+        creation_flags = 0
 
-                # 程序从哪个目录开始运行。
+        if os.name == "nt":
+            creation_flags = subprocess.CREATE_NEW_PROCESS_GROUP
+
+        try:
+            # 启动程序，得到一个可用于管理它的进程对象。
+            #
+            # *args.command 会展开列表：
+            # ["git", "--version"]
+            # 相当于分别传入 "git" 和 "--version"。
+            process = await asyncio.create_subprocess_exec(
+                *args.command,
+
+                # 命令从当前工作区开始执行。
                 cwd=self.workspace,
 
-                # 收集正常输出和错误输出，不直接打印到终端。
-                capture_output=True,
+                # 不提供交互输入。
+                stdin=asyncio.subprocess.DEVNULL,
 
-                # 将输出解码成字符串。
-                text=True,
+                # 用管道收集两种输出，不直接显示到终端。
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
 
-                encoding="utf-8",
-
-                # 按 UTF-8 解码；解码失败的字符用替代符显示。
-                errors="replace",
-
-                # 超过指定时间时抛出 TimeoutExpired。
-                timeout=args.timeout,
-
-                # 不提供交互输入，避免程序一直等待用户输入。
-                stdin=subprocess.DEVNULL,
-
-                # 直接启动程序，不通过 Shell 解析命令。
-                # shell=False（默认）→ 不通过 Shell 解析命令。
-                # subprocess.run(["ls", "-la"])
-                # 第一项 "ls" 是程序
-                # 后面 "-la" 是参数
-                # 这种写法将程序与参数分开，避免自动解析 Shell 语法。
-                # 它不限制程序访问文件或执行其它操作，不是系统级沙箱。
-                # shell=True 会通过系统命令解释器执行，具体行为与平台有关。
-                shell=False,
-
-                # 非零退出码也正常返回，方便模型查看错误并修复。
-                check=False,
+                creationflags=creation_flags,
             )
-
-        except subprocess.TimeoutExpired:
-            return f"执行超时：程序运行超过 {args.timeout} 秒。"
 
         except FileNotFoundError:
             return (
@@ -125,10 +121,65 @@ class RunCommandTool(BaseTool):
                 "以及工作区目录是否有效。"
             )
 
-        # stdout：标准输出；stderr：标准错误输出，也可能包含警告或进度。
-        # 没有输出时给一个明确的提示；是否成功还需要结合退出码判断。
-        stdout = result.stdout
-        stderr = result.stderr
+        # communicate() 同时收集正常输出、错误输出，
+        # 并等待程序结束。
+        #
+        # 将它保存为独立任务，方便中断后继续完成清理。
+        output_task = asyncio.create_task(
+            process.communicate()
+        )
+
+        try:
+            # wait_for() 限制等待时间。
+            #
+            # shield() 保护输出收集任务：
+            # 外层超时或被取消时，它暂时继续收集，
+            # 以便我们终止进程后收尾。
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                asyncio.shield(output_task),
+                timeout=args.timeout,
+            )
+
+        except TimeoutError:
+            # 超时不能只是停止等待，还需要终止进程。
+            await self.stop_process(
+                process,
+                output_task,
+            )
+
+            return (
+                f"执行超时：程序运行超过 {args.timeout} 秒，"
+                "已结束直接启动的进程。"
+            )
+
+        except asyncio.CancelledError:
+            # 用户取消任务时，先终止进程并完成清理。
+            await self.stop_process(
+                process,
+                output_task,
+            )
+
+            # 继续向外抛出取消异常。
+            # CLI 才能记录任务中断、显示提示并恢复聊天。
+            raise
+
+        # 异步进程接口返回 bytes，需要自行解码。
+        # 无法按 UTF-8 解码的字节用替代字符显示。
+        stdout = stdout_bytes.decode(
+            "utf-8",
+            errors="replace",
+        )
+
+        stderr = stderr_bytes.decode(
+            "utf-8",
+            errors="replace",
+        )
+
+        # 保持原来 text=True 的换行转换行为。
+        stdout = stdout.replace("\r\n", "\n").replace("\r", "\n")
+        stderr = stderr.replace("\r\n", "\n").replace("\r", "\n")
+
+        # 从这里开始，继续保留你原来的输出截断代码。
 
         # 保存用户指定的长度上限。
         output_limit = args.max_output_chars
@@ -172,7 +223,7 @@ class RunCommandTool(BaseTool):
         # 用列表逐段组织结果，最后拼成一个字符串。
         output = []
 
-        output.append(f"退出码：{result.returncode}")
+        output.append(f"退出码：{process.returncode}")
         output.append("正常输出：")
         output.append(stdout)
         output.append("错误输出：")

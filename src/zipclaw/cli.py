@@ -3,7 +3,7 @@
 import asyncio
 import os
 import hashlib
-
+import signal
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -126,6 +126,34 @@ async def main():
 
     print("输入 exit 或 quit 退出，输入 /clear 清空对话。")
 
+    # 当前还没有正在执行的用户任务。
+    current_task: asyncio.Task | None = None
+
+    # 获取当前 main() 所在的事件循环。
+    # 后面通过它安排“取消任务”这个操作。
+    event_loop = asyncio.get_running_loop()
+
+    def handle_interrupt(signum, frame):
+        """
+        收到 Ctrl+C 时执行这个函数。
+
+        signum 是信号编号。
+        frame 是信号发生时的 Python 执行位置。
+        这是信号处理函数要求接收的参数，目前不需要使用它们。
+        """
+
+        # 没有正在执行的任务时，使用普通的 Ctrl+C 行为。
+        # 例如正在等待用户输入，此时会抛出 KeyboardInterrupt，
+        # 由你现有的输入异常处理代码退出程序。
+        if current_task is None or current_task.done():
+            signal.default_int_handler(signum, frame)
+            return
+
+        # 安排事件循环取消当前任务，同时唤醒可能正在等待的事件循环。
+        # 这里只传入 cancel 方法，没有写括号立即执行它。
+        event_loop.call_soon_threadsafe(current_task.cancel)
+
+
     # agent 必须在循环外创建，这样才能一直保留同一个实例的历史。
     while True:
         try:
@@ -169,11 +197,44 @@ async def main():
         # else:
         #     # 没出错时才执行
         #     ...
+        # 保存原来的 Ctrl+C 处理方式。
+        # 本次任务结束后，需要恢复它。
+        previous_handler = signal.getsignal(signal.SIGINT)
+
         try:
             # result = await agent.run(task)
-            #流式输出已打印
+            # 流式输出已打印
             # 回答已经由核心循环逐段显示。
-            await agent.run(task)
+
+            # 为本次用户请求创建独立任务。
+            current_task = asyncio.create_task(
+                agent.run(task)
+            )
+
+            # SIGINT 是 Ctrl+C 对应的信号。
+            # 本次任务执行期间，收到它就调用 handle_interrupt。
+            signal.signal(
+                signal.SIGINT,
+                handle_interrupt,
+            )
+
+            # 等待任务完成。
+            # 如果任务被取消，这里会收到 CancelledError。
+            await current_task
+
+        except asyncio.CancelledError:
+            main_task = asyncio.current_task()
+
+            if main_task is not None and main_task.cancelling():
+                raise
+
+            # 先补充历史，让下次请求知道任务已经被用户中断。
+            agent.record_interruption()
+
+            print("\n[任务已停止] 已取消当前任务。")
+            print("你可以继续输入新的要求，或输入 /clear 清空对话。")
+
+            # 后面原有的保存代码会把中断记录一起保存。
 
         except AgentStepLimitError as exc:
             print(f"\n[任务停止] {exc}")
@@ -197,6 +258,17 @@ async def main():
             # 不清空历史，也不伪造一条模型回答。
             # 此前已经执行的工具和对应结果仍然保留。
             # 这里不写 continue，让下面的保存操作继续执行。
+
+        finally:
+            # 无论正常完成、发生错误，还是被取消，
+            # 都恢复本次任务开始前的 Ctrl+C 处理方式。
+            signal.signal(
+                signal.SIGINT,
+                previous_handler,
+            )
+
+            # 本次任务已经结束，不再保留“正在执行”的标记。
+            current_task = None
 
         # 流式输出，不再需要else
         # else:

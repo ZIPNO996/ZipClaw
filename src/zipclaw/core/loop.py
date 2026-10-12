@@ -252,6 +252,76 @@ class AgentLoop:
                 flush=True,
             )
 
+    def record_interruption(self) -> None:
+        """记录任务中断，补齐本次任务尚未收到的工具结果。"""
+
+        # 找到本次用户任务的起点。
+        # 只检查这次任务，不处理更早的聊天记录。
+        task_start = None
+
+        #range(len(self.messages) - 1, -1, -1)：生成从最后一个元素下标到 0 的倒序索引。
+        for index in range(len(self.messages) - 1, -1, -1):
+            message = self.messages[index]
+
+            if message.get("role") == "user":
+                task_start = index
+                break
+
+        # 没有用户任务时，不需要补充中断记录。
+        if task_start is None:
+            return
+
+        # 保存“模型已经提出，但还没有对应结果”的调用。
+        # 键是调用编号，值是工具名称。
+        pending_calls: dict[str, str] = {}
+
+        for message in self.messages[task_start:]:
+            role = message.get("role")
+
+            if role == "assistant":
+                tool_calls = message.get("tool_calls", [])
+
+                for call in tool_calls:
+                    call_id = call["id"]
+                    tool_name = call["function"]["name"]
+
+                    pending_calls[call_id] = tool_name
+
+            elif role == "tool":
+                # 有结果的调用，就不再属于“待补结果”。
+                call_id = message["tool_call_id"]
+
+                if call_id in pending_calls:
+                    del pending_calls[call_id]
+
+        # 为缺少结果的调用补充说明。
+        # 目前无法仅凭历史判断它是尚未开始，还是执行途中被取消，
+        # 所以不能直接写成“未执行”或“执行失败”。
+        for call_id, tool_name in pending_calls.items():
+            self.messages.append({
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": (
+                    f"[程序状态] 用户中断了本次任务，"
+                    f"工具 {tool_name} 未取得执行结果。"
+                    "这不代表操作未执行，也不代表已经完成。"
+                    "如之后需要继续，应先核查实际状态，"
+                    "不要直接重复执行。"
+                ),
+            })
+
+        # 将中断这件事写进历史，下一次请求时模型才能看到。
+        # 明确标注为程序状态，避免把它当成模型生成的回答。
+        self.messages.append({
+            "role": "assistant",
+            "content": (
+                "[程序状态] 用户已中断本次任务。"
+                "本次任务到此停止，已发生的操作不会自动撤销。"
+                "接下来应响应用户的最新消息；"
+                "除非用户明确要求继续，否则不要自动续做被中断的任务。"
+            ),
+        })
+
     async def run(
         self,
         task: str,
