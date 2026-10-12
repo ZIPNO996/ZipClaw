@@ -6,6 +6,9 @@ from pydantic import BaseModel, Field
 
 from ..base import BaseTool
 
+import shutil
+from tempfile import NamedTemporaryFile
+
 
 class EditFileArgs(BaseModel):
     """编辑工具的参数；先由 Pydantic 验证，再执行文件修改。"""
@@ -81,12 +84,70 @@ class EditFileTool(BaseTool):
         if updated == original:
             return f"无需修改：{args.path}"
 
-        # 学习版仍使用直接写入：w 会先截断原文件，失败时不会自动撤销。
-        # AgentLoop 已在调用工具前询问用户；这个工具内部不重复询问。
-        # 临时文件替换、专门的差异展示和并发修改检查仍待实现。
-        # newline="" 不自动转换换行；with 离开代码块后会关闭文件。
-        with target.open("w", encoding="utf-8", newline="") as file:
-            file.write(updated)
+        # 保存本次创建的临时文件路径。
+        # 一开始还没创建，所以是 None。
+        temporary_path: Path | None = None
+
+        try:
+            # 在原文件所在目录创建一个名称不重复的临时文件。
+            # 同目录可以避免跨磁盘替换的问题。
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="",
+                dir=target.parent,
+                prefix=".zipclaw-edit-",
+                suffix=".tmp",
+
+                # 离开 with 时关闭文件，但先不删除。
+                # 后面还需要用它替换原文件。
+                delete=False,
+            ) as file:
+                # file.name 是实际创建出来的临时文件路径。
+                # 先记住它，写入失败时也能找到并清理。
+                temporary_path = Path(file.name)
+
+                # 新内容先写进临时文件。
+                # 此时原文件还没有被修改。
+                file.write(updated)
+
+            # 执行到这里，临时文件已经写完并关闭。
+            # 保留原文件的普通权限位，例如执行权限。
+            # 这不等于复制所有文件属性或 Windows ACL。
+            # target是原文件路径
+            shutil.copymode(target, temporary_path)
+
+            # 保存前，再读取一次磁盘上的当前内容。
+            with target.open("r", encoding="utf-8", newline="") as file:
+                current_content = file.read()
+
+            # 与本次编辑开始时读到的内容进行比较。
+            if current_content != original:
+                raise ValueError(
+                    "文件在编辑过程中发生了变化，本次修改已取消。"
+                    "请重新读取文件后再修改。"
+                )
+
+            # 用写好的临时文件替换原文件。
+            # 替换成功后，新内容就在 target 路径下，
+            # 临时文件原来的路径不再存在。
+            temporary_path.replace(target)
+
+        finally:
+            # 无论成功还是发生异常，都尝试清理临时文件。
+            if temporary_path is not None:
+                try:
+                    # 替换成功后，临时路径已经不存在。
+                    # missing_ok=True 表示这种情况不用报错。
+                    temporary_path.unlink(missing_ok=True)
+
+                except OSError as exc:
+                    # 清理失败时给出提示。
+                    # 不让清理异常覆盖前面真正的写入或替换异常。
+                    print(
+                        f"[清理提示] 临时文件未能删除："
+                        f"{temporary_path}，原因：{exc}"
+                    )
 
         return f"已修改 {args.path}，替换了 1 处文本。"
 
