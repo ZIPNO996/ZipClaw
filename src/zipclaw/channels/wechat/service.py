@@ -23,7 +23,7 @@ HELP_TEXT = (
     "/status：查看任务状态\n"
     "/cancel：停止当前任务\n"
     "/clear：清空微信会话（先停止正在执行的任务）\n"
-    "受限模式下，写文件、运行命令和联网搜索前会请求确认，"
+    "受限模式下，写文件、运行命令、联网搜索和生图前会请求确认，"
     "请回复消息中的 /approve 或 /deny 指令。"
 )
 
@@ -180,6 +180,11 @@ class WechatService:
             )
             if name == "web_search":
                 prompt += "搜索关键词会发送给 Tavily，并消耗其搜索额度。\n"
+            if name == "generate_image":
+                prompt += (
+                    "图片描述和参考图链接会发送给 ModelScope，并使用其额度。\n"
+                    "取消本地等待不代表取消远端任务；失败时不会自动重新提交。\n"
+                )
             if name == "edit_file":
                 preview = self.agent.build_edit_preview(arguments)
                 if preview is not None:

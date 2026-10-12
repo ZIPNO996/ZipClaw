@@ -23,3 +23,11 @@ class ModelRequestError(RuntimeError):
 
 class ModelResponseError(RuntimeError):
     """模型返回内容无法使用，例如工具参数不是合法 JSON。"""
+
+
+class ImageGenerationError(Exception):
+    """生图工具的业务错误，不是聊天模型请求失败。"""
+
+    # 图片工具在遇到无效路径、任务失败或无效图片时抛出这个异常。
+    # execute() 会捕获它并返回工具失败结果，让模型知道本次没有成功。
+    # 传入的错误说明不包含原始 HTTP 正文或认证信息。

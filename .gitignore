@@ -41,3 +41,8 @@ Thumbs.db
 
 # 日志
 *.log
+
+# Agent 默认生成的图片，以及强制退出可能遗留的临时图片文件。
+# 用户明确指定的其它图片文件名不会被这个规则统一忽略。
+generated_*.png
+.zipclaw-image-*.tmp

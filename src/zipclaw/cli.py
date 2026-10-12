@@ -116,6 +116,19 @@ async def main():
     else:
         print("网页搜索：未启用（未配置 TAVILY_API_KEY）。")
 
+    # 生图与聊天使用不同的服务和密钥；输出路径仍以当前工作区为基准。
+    if config.modelscope_api_key is not None:
+        from .tools.media.generate_image import GenerateImageTool
+
+        registry.register(GenerateImageTool(
+            workspace=workspace,
+            api_key=config.modelscope_api_key,
+            model=config.modelscope_image_model,
+        ))
+        print("图片生成：已启用（ModelScope，调用前需要确认）。")
+    else:
+        print("图片生成：未启用（未配置 MODELSCOPE_API_KEY）。")
+
     # 创建 智能体。
     agent = AgentLoop(
         llm=llm,

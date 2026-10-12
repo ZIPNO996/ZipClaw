@@ -127,6 +127,16 @@ async def run_agent(workspace: Path, credentials_path: Path) -> None:
     if config.tavily_api_key is not None:
         registry.register(WebSearchTool(api_key=config.tavily_api_key))
 
+    if config.modelscope_api_key is not None:
+        from ...tools.media.generate_image import GenerateImageTool
+
+        registry.register(GenerateImageTool(
+            workspace=workspace,
+            api_key=config.modelscope_api_key,
+            model=config.modelscope_image_model,
+            full_access=config.wechat_full_access,
+        ))
+
     llm = OpenAILLM(
         api_key=config.api_key,
         model=config.model,
@@ -208,6 +218,10 @@ async def run_agent(workspace: Path, credentials_path: Path) -> None:
             print("网页搜索：已启用（Tavily）。")
         else:
             print("网页搜索：未启用（未配置 TAVILY_API_KEY）。")
+        if config.modelscope_api_key is not None:
+            print("图片生成：已启用（ModelScope）。")
+        else:
+            print("图片生成：未启用（未配置 MODELSCOPE_API_KEY）。")
         # 锁按微信绑定共用，而不是按工作区分开。进程退出时操作系统也会释放锁。
         with account_run_lock(channel_directory / "run.lock"):
             await service.run()

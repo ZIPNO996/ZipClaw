@@ -8,6 +8,7 @@ dependencies = [
     "dotenv>=0.9.9",
     "httpx>=0.28.1",
     "openai>=3.19.2",
+    "pillow>=11.0.0",
     "pydantic>=2.13.5",
 ]
 

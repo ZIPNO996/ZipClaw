@@ -80,6 +80,9 @@ class AppConfig:
     wechat_full_access: bool = False
     # 搜索使用独立密钥；不配置时不注册 web_search，原有聊天仍然可用。
     tavily_api_key: str | None = field(default=None, repr=False)
+    # 生图使用 ModelScope Token；未填写时不注册 generate_image。
+    modelscope_api_key: str | None = field(default=None, repr=False)
+    modelscope_image_model: str = "Qwen/Qwen-Image-2.1-Turbo"
 
 
 def load_config() -> AppConfig:
@@ -155,6 +158,19 @@ def load_config() -> AppConfig:
         if stripped_key:
             tavily_api_key = stripped_key
 
+    modelscope_api_key_value = os.getenv("MODELSCOPE_API_KEY")
+    modelscope_api_key = None
+    if modelscope_api_key_value is not None:
+        stripped_key = modelscope_api_key_value.strip()
+        if stripped_key:
+            modelscope_api_key = stripped_key
+
+    modelscope_image_model = os.getenv(
+        "MODELSCOPE_IMAGE_MODEL", "Qwen/Qwen-Image-2.1-Turbo",
+    ).strip()
+    if modelscope_api_key is not None and not modelscope_image_model:
+        raise ValueError("启用生图时，MODELSCOPE_IMAGE_MODEL 不能留空。")
+
     # 用字段名传入值，方便阅读，也避免混淆参数顺序。
     return AppConfig(
         api_key=api_key,
@@ -168,4 +184,6 @@ def load_config() -> AppConfig:
         thinking_mode=thinking_mode,
         wechat_full_access=wechat_full_access,
         tavily_api_key=tavily_api_key,
+        modelscope_api_key=modelscope_api_key,
+        modelscope_image_model=modelscope_image_model,
     )

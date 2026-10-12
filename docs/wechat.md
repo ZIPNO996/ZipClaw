@@ -79,6 +79,16 @@ TAVILY_API_KEY=你的Tavily密钥
 搜索密钥与 USTC 模型密钥不同，调用使用 Tavily 的额度；修改后重启入口。
 搜索不属于本地只读工具：受限模式下先确认关键词，完全访问模式下免确认。
 
+需要生成图片时，在同一份项目 .env 中添加独立的 ModelScope Token：
+
+~~~dotenv
+MODELSCOPE_API_KEY=你的ModelScopeToken
+MODELSCOPE_IMAGE_MODEL=Qwen/Qwen-Image-2.1-Turbo
+~~~
+
+留空不注册 generate_image，不影响发送已有图片。填写后重启，工具通过远端接口生图，
+不下载模型权重。生图也需要操作确认，完全访问模式下免确认；额度属于 ModelScope。
+
 微信命令入口不传 --workspace 时，也默认使用当前用户的桌面。
 要操作其它目录，可以通过 --workspace 明确指定，不影响普通 zipclaw 的工作区规则。
 
@@ -118,7 +128,7 @@ uv run --extra wechat zipclaw-wechat run --workspace "C:\Users\28657\Desktop\Zip
 读取 README.md 的前 20 行，然后简单介绍项目。
 ~~~
 
-读取、本地文本搜索和列目录直接执行。要修改文件、执行命令或联网搜索时，机器人先发工具名称、
+读取、本地文本搜索和列目录直接执行。要修改文件、执行命令、联网搜索或生图时，机器人先发工具名称、
 完整参数，以及本次确认编号，例如：
 
 ~~~text
@@ -150,6 +160,26 @@ uv run --extra wechat zipclaw-wechat run --workspace "C:\Users\28657\Desktop\Zip
 微信 CDN，再发送原生图片消息。仅在回答中输出本机路径或 Markdown
 图片语法不能把图片发到手机。支持 PNG/JPEG，单张图片的应用上限为 10 MiB。
 完全访问关闭时，图片也必须在工作区内；开启时允许外部绝对路径。
+
+### 生成图片并发回手机
+
+配置 MODELSCOPE_API_KEY 并重启后，发送：
+
+~~~text
+生成一张水彩橘猫图片，发给我，不要额外代码文件。
+~~~
+
+模型先调用 generate_image，提交 ModelScope 异步任务、等待完成并保存一张 PNG；
+成功后再调用已有的 send_image 把图片发到手机。默认文件保存在当前工作区，
+微信默认工作区是桌面，不会创建绘图脚本或 README。
+
+可以明确要求新文件名，例如“保存为 cat.png”；若文件已存在，工具拒绝覆盖。
+需要参考图编辑时，可以提供公开 HTTPS 图片链接。本版不支持本机参考图上传、
+手机图片作为参考图自动传入、Base64 或 LoRA；参数和限制见 README 的 generate_image 小节。
+
+任务总等待上限为 180 秒，每五秒异步查询一次。/cancel 可以停止本地等待，
+但不保证取消已提交的远端任务或退回额度。失败、超时和中断不自动重新提交，
+避免再次消耗额度；暂未接入任务恢复和重新下载。
 
 ### 网页搜索
 
