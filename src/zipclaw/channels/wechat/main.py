@@ -19,6 +19,7 @@ from ...tools.filesystem.read_file import ReadFileTool
 from ...tools.filesystem.write_file import WriteFileTool
 from ...tools.registry import ToolRegistry
 from ...tools.shell.run_command import RunCommandTool
+from ...tools.media.analyze_image import AnalyzeImageTool
 from ...tools.web.web_search import WebSearchTool
 from .client import WechatAPIError, WechatClient
 from .login import login
@@ -122,6 +123,13 @@ async def run_agent(workspace: Path, credentials_path: Path) -> None:
     registry.register(WriteFileTool(workspace, full_access=config.wechat_full_access))
     registry.register(EditFileTool(workspace, full_access=config.wechat_full_access))
     registry.register(RunCommandTool(workspace))
+    registry.register(AnalyzeImageTool(
+        workspace=workspace,
+        api_key=config.api_key,
+        model=config.vision_model or config.model,
+        base_url=config.base_url,
+        full_access=config.wechat_full_access,
+    ))
 
     # 与终端入口共用搜索工具；微信发送图片等通道功能仍然独立。
     if config.tavily_api_key is not None:
@@ -168,6 +176,10 @@ async def run_agent(workspace: Path, credentials_path: Path) -> None:
             "用户可以通过 /cancel 停止任务，通过 /clear 清空会话。\n"
             "需要把图片发到手机时，调用 send_image 发送已有的本机 PNG 或 JPEG；"
             "仅返回本机路径或 Markdown 图片语法不会发送图片。\n"
+            "收到手机图片后，程序会提供工作区内的附件路径。"
+            "分析截图或照片时使用 analyze_image，不能仅凭路径或文件名声称看过图片。\n"
+            "修改用户图片时，把对应附件路径传入 generate_image 的 image_paths，"
+            "不必先分析再编辑；只有用户确实需要理解图片时才调用分析工具。\n"
         )
         # 只约束图片任务，不影响用户明确要求编写代码的任务。
         agent.messages[0]["content"] += (
@@ -203,6 +215,7 @@ async def run_agent(workspace: Path, credentials_path: Path) -> None:
             session_store,
             directory / "receive-state.json",
             full_access=config.wechat_full_access,
+            workspace=workspace,
         )
         registry.register(
             SendImageTool(
@@ -214,6 +227,8 @@ async def run_agent(workspace: Path, credentials_path: Path) -> None:
         print(f"微信 Agent 工作区：{workspace}")
         print("微信访问模式：" + ("完全访问" if config.wechat_full_access else "需要操作确认"))
         print(f"微信会话文件：{session_store.file_path}")
+        print(f"图片理解模型：{config.vision_model or config.model}（需服务支持图片输入）。")
+        print(f"收到的图片缓存：{service.image_directory}")
         if config.tavily_api_key is not None:
             print("网页搜索：已启用（Tavily）。")
         else:

@@ -12,10 +12,11 @@ from uuid import uuid4
 
 import httpx
 from PIL import Image, UnidentifiedImageError
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from ...error.custom_errors import ImageGenerationError
+from ...error.custom_errors import ImageGenerationError, ImageInputError
 from ..base import BaseTool
+from .image_utils import local_image_data_url
 
 
 class GenerateImageArgs(BaseModel):
@@ -35,8 +36,30 @@ class GenerateImageArgs(BaseModel):
     image_url: list[str] = Field(
         default_factory=list,
         max_length=2,
-        description="可选的公开 HTTPS 参考图链接，最多两张；不支持本机路径或 Base64。",
+        description="可选的公开 HTTPS 参考图链接；与 image_paths 合计最多两张，不要传入 Base64。",
     )
+    image_paths: list[str] = Field(
+        default_factory=list,
+        max_length=2,
+        description="可选的本机参考图片路径，相对于工作区；微信收到的图片会提供路径，与 image_url 合计最多两张。",
+    )
+
+    @field_validator("image_paths")
+    @classmethod
+    def check_reference_paths(cls, values: list[str]) -> list[str]:
+        paths = []
+        for value in values:
+            path = value.strip()
+            if not path or len(path) > 500:
+                raise ValueError("参考图路径不能为空，也不能超过 500 个字符。")
+            paths.append(path)
+        return paths
+
+    @model_validator(mode="after")
+    def check_reference_count(self):
+        if len(self.image_url) + len(self.image_paths) > 2:
+            raise ValueError("本机参考图与参考图链接合计最多两张。")
+        return self
 
     @field_validator("prompt", "path")
     @classmethod
@@ -83,11 +106,12 @@ class GenerateImageTool(BaseTool):
 
     name = "generate_image"
     description = (
-        "通过 ModelScope 生成一张图片，或根据公开参考图链接修改图片，保存为 PNG。"
+        "通过 ModelScope 生成一张图片，或根据本机参考图、公开参考图链接修改图片，保存为 PNG。"
         "只生成图片，不创建 Python 脚本、README 或依赖文件。"
         "省略 path 时使用工作区内的唯一文件名；已有文件一律不覆盖。"
         "返回实际保存的路径；通过微信发图时，成功后还需调用 send_image。"
-        "会发送图片描述和参考图链接，使用 ModelScope 的额度；失败时不要自动重新提交。"
+        "本机参考图使用 image_paths，链接使用 image_url；程序负责编码，不要用工具生成 Base64。"
+        "会发送图片描述和参考图片，使用 ModelScope 的额度；失败时不要自动重新提交。"
         "本地取消或超时不代表远端任务已经取消，不能声称额度已退回。"
     )
     args_model = GenerateImageArgs
@@ -297,8 +321,19 @@ class GenerateImageTool(BaseTool):
                 "model": self.model,
                 "prompt": args.prompt,
             }
-            if args.image_url:
-                body["image_url"] = args.image_url
+            # 在提交付费任务之前检查全部参考图，不能先提交再发现输入无效。
+            # Base64 只存在于请求体中，工具参数、结果和聊天记录均不包含它。
+            references = list(args.image_url)
+            for path in args.image_paths:
+                data_url = await asyncio.to_thread(
+                    local_image_data_url,
+                    self.workspace,
+                    path,
+                    self.full_access,
+                )
+                references.append(data_url)
+            if references:
+                body["image_url"] = references
             headers = {
                 "Authorization": f"Bearer {self.api_key}",
                 "X-ModelScope-Async-Mode": "true",
@@ -332,7 +367,7 @@ class GenerateImageTool(BaseTool):
 
             # 最后才保存，并且这段不包含 await，避免取消后后台线程仍在写文件。
             self.save_image(target, png_bytes)
-        except ImageGenerationError as exc:
+        except (ImageGenerationError, ImageInputError) as exc:
             return self.error_result(str(exc), task_id)
         except (httpx.TimeoutException, TimeoutError):
             return self.error_result("生图等待超时。远端任务可能仍在执行，请勿自动重新提交。", task_id)

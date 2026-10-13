@@ -250,6 +250,104 @@ class WechatClient:
             timeout=10.0,
         )
 
+    def decode_image_key(self, image_item: dict, media: dict) -> bytes | None:
+        """兼容微信入站图片的十六进制密钥，以及两种 Base64 密钥格式。"""
+
+        try:
+            # 官方协议：图片自己的 aeskey 优先于 media.aes_key。
+            hex_key = image_item.get("aeskey")
+            if hex_key:
+                if not isinstance(hex_key, str) or len(hex_key) != 32:
+                    raise ValueError
+                key = bytes.fromhex(hex_key)
+            else:
+                encoded_key = media.get("aes_key")
+                if not encoded_key:
+                    # 部分入站图片没有加密密钥，官方客户端将其视为明文。
+                    # 后续仍会检查实际图片内容，不会直接把任意文件交给模型。
+                    return None
+                if not isinstance(encoded_key, str) or len(encoded_key) > 128:
+                    raise ValueError
+                decoded = base64.b64decode(encoded_key, validate=True)
+                if len(decoded) == 16:
+                    key = decoded
+                elif len(decoded) == 32:
+                    key = bytes.fromhex(decoded.decode("ascii"))
+                else:
+                    raise ValueError
+            if len(key) != 16:
+                raise ValueError
+        except (ValueError, UnicodeError):
+            raise WechatAPIError("微信图片的解密参数无效，无法接收。") from None
+        return key
+
+    async def download_image(self, image_item: dict) -> bytes:
+        """从微信 CDN 下载并解密图片；不返回下载凭证，也不把它们发给模型。"""
+
+        media = image_item.get("media")
+        if not isinstance(media, dict):
+            raise WechatAPIError("微信图片缺少有效的媒体信息。")
+        key = self.decode_image_key(image_item, media)
+        encryption_type = media.get("encrypt_type")
+        if encryption_type is not None and encryption_type != 1:
+            raise WechatAPIError("暂不支持这种微信图片加密方式。")
+
+        url = media.get("full_url")
+        if not isinstance(url, str) or not url.strip():
+            parameter = media.get("encrypt_query_param")
+            if not isinstance(parameter, str) or not parameter or len(parameter) > 8192:
+                raise WechatAPIError("微信图片缺少有效的下载参数。")
+            query = urlencode({"encrypted_query_param": parameter})
+            url = "https://novac2c.cdn.weixin.qq.com/c2c/download?" + query
+
+        try:
+            parsed = urlsplit(url)
+            if (
+                len(url) > 20000
+                or any(ord(character) < 32 for character in url)
+                or parsed.scheme != "https"
+                or not (parsed.hostname or "").endswith(".weixin.qq.com")
+                or parsed.port not in {None, 443}
+                or parsed.username is not None
+                or parsed.password is not None
+            ):
+                raise ValueError
+        except ValueError:
+            raise WechatAPIError("微信图片下载地址不在允许的 HTTPS CDN 范围内。") from None
+
+        # AES 填充最多增加 16 个字节；限额不能在解密后才检查。
+        max_download_bytes = 10 * 1024 * 1024 + 16
+        data = bytearray()
+        try:
+            # 不使用 request()，否则会带上机器人的鉴权头。
+            # 不跟随重定向，防止下载地址跳到其它服务。
+            async with self.http.stream(
+                "GET", url, timeout=30.0, follow_redirects=False,
+            ) as response:
+                response.raise_for_status()
+                if response.status_code != 200:
+                    raise WechatAPIError("微信图片下载没有返回成功状态。")
+                async for chunk in response.aiter_bytes(chunk_size=65536):
+                    if len(data) + len(chunk) > max_download_bytes:
+                        raise WechatAPIError("微信图片超过 10 MiB 接收上限。")
+                    data.extend(chunk)
+        except httpx.HTTPStatusError as exc:
+            raise WechatAPIError(
+                f"微信图片下载失败，HTTP 状态码：{exc.response.status_code}。"
+            ) from None
+        except httpx.RequestError:
+            raise WechatAPIError("微信图片下载连接失败或超时，请重新发送图片。") from None
+
+        if key is None:
+            return bytes(data)
+        try:
+            decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+            padded_data = decryptor.update(bytes(data)) + decryptor.finalize()
+            unpadder = padding.PKCS7(128).unpadder()
+            return unpadder.update(padded_data) + unpadder.finalize()
+        except ValueError:
+            raise WechatAPIError("微信图片解密失败，请重新发送图片。") from None
+
     async def send_image(self, user_id: str, data: bytes, context_token: str) -> None:
         """上传加密图片，再发送原生图片消息；不是发送本机路径或 Markdown。"""
 

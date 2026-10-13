@@ -106,6 +106,18 @@ async def main():
         )
     )
 
+    # 看图不要求主聊天模型支持视觉；可以用同一服务中的另一个模型。
+    # 只有调用工具时才发送图片，普通文字对话不增加额外请求。
+    from .tools.media.analyze_image import AnalyzeImageTool
+
+    registry.register(AnalyzeImageTool(
+        workspace=workspace,
+        api_key=config.api_key,
+        model=config.vision_model or config.model,
+        base_url=config.base_url,
+    ))
+    print(f"图片理解模型：{config.vision_model or config.model}（调用前需要确认，需支持图片输入）。")
+
     # 有独立搜索密钥才把工具提供给模型；不配置不影响原有六个工具。
     if config.tavily_api_key is not None:
         # 启用时才导入，旧的可编辑命令环境在同步新依赖前仍可使用原有聊天。

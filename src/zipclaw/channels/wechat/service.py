@@ -1,8 +1,9 @@
-"""把微信文字消息交给 Agent；独立接收循环让取消和操作确认能及时处理。"""
+"""把微信文字和图片交给 Agent；接收循环独立处理取消与操作确认。"""
 
 import asyncio
 import json
 from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from uuid import uuid4
 
@@ -12,20 +13,40 @@ from ...error.custom_errors import (
     AgentStepLimitError,
     ModelRequestError,
     ModelResponseError,
+    ImageInputError,
 )
+from ...tools.media.image_utils import prepare_png
 from .client import WechatAPIError, WechatClient
 from .storage import WechatCredentials, read_json, write_json
 
 
 HELP_TEXT = (
     "发送文字即可让 ZipClaw 处理当前工作区。\n"
+    "也可以先发送图片，再说分析或修改要求；最多关联两张图片。\n"
     "/help：查看帮助\n"
     "/status：查看任务状态\n"
     "/cancel：停止当前任务\n"
     "/clear：清空微信会话（先停止正在执行的任务）\n"
-    "受限模式下，写文件、运行命令、联网搜索和生图前会请求确认，"
+    "受限模式下，写文件、运行命令、联网搜索、图片分析和生图前会请求确认，"
     "请回复消息中的 /approve 或 /deny 指令。"
 )
+
+
+@dataclass
+class WechatImage:
+    """一张微信图片：下载前保存媒体信息，下载后改为本机路径。"""
+
+    # CDN 参数和解密密钥只暂存在内存，不写入聊天历史或收消息记录。
+    image_item: dict | None = field(default=None, repr=False)
+    path: str | None = None
+
+
+@dataclass
+class WechatTask:
+    """排队时固定文字与对应图片，不能在开始执行时临时换成最新图片。"""
+
+    text: str
+    images: tuple[WechatImage, ...] = ()
 
 
 class WechatService:
@@ -37,6 +58,7 @@ class WechatService:
         session_store: SessionStore,
         state_path: Path,
         full_access: bool = False,
+        workspace: Path | None = None,
     ):
         self.client = client
         self.credentials = credentials
@@ -44,6 +66,13 @@ class WechatService:
         self.session_store = session_store
         self.state_path = state_path
         self.full_access = full_access
+        self.workspace = (workspace or Path.cwd()).resolve()
+        # 放在工作区内，受限模式也能读取；不同微信会话使用独立子目录。
+        self.image_directory = (
+            self.workspace / ".zipclaw" / "wechat-images" / state_path.parent.name
+        ).resolve()
+        if not self.image_directory.is_relative_to(self.workspace):
+            raise ValueError("微信图片缓存目录不能位于工作区之外。")
         self.state = read_json(state_path)
         self.cursor = self.state.get("cursor", "")
         self.seen_ids = self.state.get("seen_ids", [])
@@ -55,12 +84,27 @@ class WechatService:
             raise ValueError("微信收消息进度格式不正确，请检查本地记录。")
 
         self.context_token = ""
+        self.recent_images: list[WechatImage] = []
+        saved_paths = self.state.get("recent_image_paths", [])
+        if (
+            not isinstance(saved_paths, list)
+            or len(saved_paths) > 2
+            or any(not isinstance(path, str) for path in saved_paths)
+        ):
+            raise ValueError("微信图片记录格式不正确。")
+        for path in saved_paths:
+            target = (self.workspace / path).resolve()
+            if not target.is_relative_to(self.image_directory):
+                raise ValueError("微信图片记录指向了缓存目录之外。")
+            self.recent_images.append(WechatImage(path=path))
+        # 连续发送的纯图片组成同一批；提出文字任务后，下一批图片重新开始。
+        self.collecting_images = False
         self.current_task: asyncio.Task | None = None
         self.approval_id = ""
         self.approval_future: asyncio.Future | None = None
         self.send_lock = asyncio.Lock()
         # 忙碌时只排队，不向手机重复发送状态提示。
-        self.pending_tasks: deque[str] = deque()
+        self.pending_tasks: deque[WechatTask] = deque()
         self.stopping = False
         self.typing_task: asyncio.Task | None = None
         self.typing_ticket = ""
@@ -87,6 +131,9 @@ class WechatService:
                 "cursor": self.cursor,
                 "seen_ids": self.seen_ids[-1000:],
                 "task_status": self.task_status,
+                "recent_image_paths": [
+                    image.path for image in self.recent_images if image.path is not None
+                ],
             },
         )
 
@@ -153,10 +200,42 @@ class WechatService:
         self.typing_task = None
         await self.set_typing(False)
 
-    def start_task(self, text: str) -> None:
+    def start_task(self, task: WechatTask) -> None:
         self.task_status = "执行中"
         self.save_state()
-        self.current_task = asyncio.create_task(self.run_task(text))
+        self.current_task = asyncio.create_task(self.run_task(task))
+
+    async def cache_image(self, image: WechatImage) -> str:
+        """下载图片、检查内容，再以唯一文件名保存；下载期间接收循环仍在运行。"""
+
+        if image.path is not None:
+            return image.path
+        if not isinstance(image.image_item, dict):
+            raise ImageInputError("图片附件缺少下载信息，请重新发送。")
+        image_bytes = await self.client.download_image(image.image_item)
+        png_bytes = await asyncio.to_thread(prepare_png, image_bytes)
+
+        # 即使开启完全访问，自动接收的图片也只保存到本会话的缓存目录。
+        # 再检查目录没有被换成指向外部的链接，且不采用手机提供的文件名。
+        if self.image_directory.resolve() != self.image_directory:
+            raise ImageInputError("微信图片缓存目录发生变化，已停止保存。")
+        self.image_directory.mkdir(parents=True, exist_ok=True)
+        target = self.image_directory / (uuid4().hex + ".png")
+        # 写入不放在线程里，避免 /cancel 后后台线程继续生成文件。
+        # xb 只允许创建新文件，不会覆盖已有图片。
+        created = False
+        try:
+            with target.open("xb") as file:
+                created = True
+                file.write(png_bytes)
+        except OSError:
+            if created:
+                target.unlink(missing_ok=True)
+            raise
+        image.path = target.relative_to(self.workspace).as_posix()
+        image.image_item = None
+        self.save_state()
+        return image.path
 
     async def confirm_tool(self, name: str, arguments: dict) -> bool:
         # 图片只发送给当前扫码用户；完全访问模式则所有工具免确认。
@@ -182,9 +261,11 @@ class WechatService:
                 prompt += "搜索关键词会发送给 Tavily，并消耗其搜索额度。\n"
             if name == "generate_image":
                 prompt += (
-                    "图片描述和参考图链接会发送给 ModelScope，并使用其额度。\n"
+                    "图片描述和参考图片会发送给 ModelScope，并使用其额度。\n"
                     "取消本地等待不代表取消远端任务；失败时不会自动重新提交。\n"
                 )
+            if name == "analyze_image":
+                prompt += "图片和问题会发送给配置的视觉模型服务，并使用其额度。\n"
             if name == "edit_file":
                 preview = self.agent.build_edit_preview(arguments)
                 if preview is not None:
@@ -247,25 +328,36 @@ class WechatService:
 
         items = message.get("item_list")
         if not isinstance(items, list):
-            await self.send("当前只支持文字消息。")
+            await self.send("当前支持文字和图片消息。")
             return
         pieces = []
+        images = []
         for item in items:
-            if not isinstance(item, dict) or item.get("type") != 1:
+            if not isinstance(item, dict):
                 continue
-            text_item = item.get("text_item")
-            if isinstance(text_item, dict) and isinstance(text_item.get("text"), str):
-                pieces.append(text_item["text"])
+            if item.get("type") == 1:
+                text_item = item.get("text_item")
+                if isinstance(text_item, dict) and isinstance(text_item.get("text"), str):
+                    pieces.append(text_item["text"])
+            elif item.get("type") == 2:
+                image_item = item.get("image_item")
+                if not isinstance(image_item, dict):
+                    await self.send("图片消息格式不正确，请重新发送。")
+                    return
+                images.append(WechatImage(image_item=image_item))
         text = "\n".join(pieces).strip()
-        if not text:
-            await self.send("当前只支持文字，请直接发送文字任务。")
+        if not text and not images:
+            await self.send("当前支持文字和图片，暂不支持语音、视频或其它附件。")
+            return
+        if len(images) > 2:
+            await self.send("一次最多处理两张图片，请分开发送。")
             return
         if len(text.encode("utf-8")) > 30000:
             await self.send("文字任务过长，请拆成较短的消息。")
             return
 
         words = text.split()
-        command = words[0].lower()
+        command = words[0].lower() if words else ""
         if command in {"/approve", "/deny"}:
             future = self.approval_future
             if (
@@ -294,8 +386,16 @@ class WechatService:
             # 取消时也清掉排队消息，避免刚停止就自动开启后续任务。
             self.pending_tasks.clear()
             if self.busy():
-                self.current_task.cancel()
-                # 不在接收循环里等待任务结束，任务本身完成清理后会回复。
+                task = self.current_task
+                task.cancel()
+                # 只让出一轮事件循环，不等待下载或模型请求结束。
+                # 若任务尚未开始就被取消，run_task 的异常处理根本没机会执行，
+                # 因此在这里补充状态和回复；已进入 run_task 的任务由它自行清理。
+                await asyncio.sleep(0)
+                if task.cancelled():
+                    self.task_status = "已取消"
+                    self.save_state()
+                    await self.send("当前任务已取消。")
             else:
                 await self.send("当前没有正在执行的任务。")
             return
@@ -306,35 +406,84 @@ class WechatService:
                 cleared_messages = [self.agent.messages[0]]
                 self.session_store.save(cleared_messages)
                 self.agent.messages = cleared_messages
+                self.recent_images.clear()
+                self.collecting_images = False
+                self.save_state()
                 await self.send("微信会话已清空。终端会话不受影响。")
             return
         if text.startswith("/"):
             await self.send("未知指令，请发送 /help 查看可用指令。")
             return
+
+        if images:
+            if text or not self.collecting_images:
+                self.recent_images = list(images)
+            else:
+                # 微信常把两张照片发成两条消息；保留这批最近的两张。
+                self.recent_images = (self.recent_images + images)[-2:]
+            self.collecting_images = not bool(text)
+            # 同一条消息有文字与图片时，只绑定该消息自己的图片。
+            selected_images = tuple(images)
+        else:
+            selected_images = tuple(self.recent_images)
+            self.collecting_images = False
+
+        # 图片对象共享下载后的路径，但任务绑定的对象集合不再变化。
+        # 例如图 A 尚在下载时，文字任务先排队；之后仍能拿到 A 的路径。
+        task = WechatTask(text=text, images=selected_images)
         if self.busy():
-            self.pending_tasks.append(text)
+            self.pending_tasks.append(task)
             return
 
-        self.start_task(text)
+        self.start_task(task)
 
-    async def run_task(self, text: str) -> None:
+    async def run_task(self, task: WechatTask) -> None:
         reply = ""
+        agent_started = False
         self.typing_ticket = ""
         self.typing_task = asyncio.create_task(self.typing_loop())
         try:
-            result = await self.agent.run(text)
-            reply = result if result.strip() else "任务已结束，模型没有返回文字回答。"
-            self.task_status = "已完成"
+            paths = []
+            for image in task.images:
+                paths.append(await self.cache_image(image))
+            if not task.text:
+                # 纯图片先接收，不擅自调用模型消耗额度，也不猜用户要分析还是修改。
+                reply = "图片已收到，可以告诉我想分析或修改什么。"
+                self.task_status = "图片已接收"
+            else:
+                text = task.text
+                if paths:
+                    attachment_text = json.dumps(paths, ensure_ascii=False)
+                    text += (
+                        "\n\n[程序提供的图片附件信息]\n"
+                        "与这条任务关联的图片路径（相对于工作区，按图片顺序排列）："
+                        + attachment_text
+                        + "\n这些路径只是附件位置，不是图片内容。"
+                        "需要看图时调用 analyze_image；需要修改图片时将路径传入 generate_image 的 image_paths。"
+                        "若用户本次问题与图片无关，不必调用图片工具。"
+                    )
+                agent_started = True
+                result = await self.agent.run(text)
+                reply = result if result.strip() else "任务已结束，模型没有返回文字回答。"
+                self.task_status = "已完成"
         except asyncio.CancelledError:
-            self.agent.record_interruption()
+            if agent_started:
+                self.agent.record_interruption()
             self.task_status = "已取消"
             reply = "当前任务已取消。已经发生的文件修改不会自动撤销。"
+        except (WechatAPIError, ImageInputError, OSError) as exc:
+            if agent_started:
+                self.agent.record_interruption()
+            self.task_status = "任务停止"
+            message = str(exc) if not isinstance(exc, OSError) else "图片缓存保存失败，请检查目录权限。"
+            reply = f"任务已停止：{message}\n请重新发送图片或新的要求。"
         except (AgentStepLimitError, ModelRequestError, ModelResponseError) as exc:
             self.task_status = "任务停止"
             reply = f"任务已停止：{exc}\n可以继续发送新的要求。"
         except Exception as exc:
             # 本次任务可能在工具确认阶段或执行阶段失败，补齐未完成工具记录。
-            self.agent.record_interruption()
+            if agent_started:
+                self.agent.record_interruption()
             self.task_status = "执行失败"
             reply = "任务执行失败，已停止。请检查运行终端，并核查已有文件修改。"
             print(f"微信任务执行失败，异常类型：{type(exc).__name__}。", flush=True)
@@ -359,7 +508,7 @@ class WechatService:
             self.start_task(self.pending_tasks.popleft())
 
     async def run(self) -> None:
-        print("微信入口已启动。向微信 ClawBot 发送文字即可使用，Ctrl+C 停止服务。")
+        print("微信入口已启动。向微信 ClawBot 发送文字或图片即可使用，Ctrl+C 停止服务。")
         self.save_state()
         try:
             while True:

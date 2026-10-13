@@ -83,6 +83,9 @@ class AppConfig:
     # 生图使用 ModelScope Token；未填写时不注册 generate_image。
     modelscope_api_key: str | None = field(default=None, repr=False)
     modelscope_image_model: str = "Qwen/Qwen-Image-2.1-Turbo"
+    # 可单独指定同一模型服务中的视觉模型；留空时尝试复用聊天模型。
+    # 是否真的支持图片，取决于服务提供的模型能力，不靠名称猜测。
+    vision_model: str | None = None
 
 
 def load_config() -> AppConfig:
@@ -171,6 +174,9 @@ def load_config() -> AppConfig:
     if modelscope_api_key is not None and not modelscope_image_model:
         raise ValueError("启用生图时，MODELSCOPE_IMAGE_MODEL 不能留空。")
 
+    vision_model_value = os.getenv("ZIPCLAW_VISION_MODEL", "").strip()
+    vision_model = vision_model_value or None
+
     # 用字段名传入值，方便阅读，也避免混淆参数顺序。
     return AppConfig(
         api_key=api_key,
@@ -186,4 +192,5 @@ def load_config() -> AppConfig:
         tavily_api_key=tavily_api_key,
         modelscope_api_key=modelscope_api_key,
         modelscope_image_model=modelscope_image_model,
+        vision_model=vision_model,
     )

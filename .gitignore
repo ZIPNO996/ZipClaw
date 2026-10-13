@@ -46,3 +46,4 @@ Thumbs.db
 # 用户明确指定的其它图片文件名不会被这个规则统一忽略。
 generated_*.png
 .zipclaw-image-*.tmp
+.zipclaw/
